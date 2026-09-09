@@ -1,13 +1,4 @@
 ---
-- name: preserve ansible user passwordless sudo before stig
-  ansible.builtin.copy:
-    dest: /etc/sudoers.d/99-ansible-user
-    content: "{{ ansible_user | default('ec2-user') }} ALL=(ALL) NOPASSWD: ALL\n"
-    owner: root
-    group: root
-    mode: "0440"
-    validate: visudo -cf %s
-
 - name: install openscap packages
   ansible.builtin.dnf:
     name:
@@ -36,17 +27,21 @@
       STIG datastream not found at {{ rhel_hardening_stig_datastream }}.
       Ensure scap-security-guide is installed.
 
-- name: apply stig remediation
-  ansible.builtin.command:
-    cmd: >-
-      oscap xccdf eval
-      --remediate
-      --profile {{ rhel_hardening_stig_profile }}
-      --results {{ rhel_hardening_stig_results_dir }}/stig-remediation.xml
-      --report {{ rhel_hardening_stig_results_dir }}/stig-remediation.html
-      {{ rhel_hardening_stig_datastream }}
+- name: apply stig remediation and preserve ansible sudo access
+  ansible.builtin.shell:
+    cmd: |
+      oscap xccdf eval \
+        --remediate \
+        --profile {{ rhel_hardening_stig_profile }} \
+        --results {{ rhel_hardening_stig_results_dir }}/stig-remediation.xml \
+        --report {{ rhel_hardening_stig_results_dir }}/stig-remediation.html \
+        {{ rhel_hardening_stig_datastream }}
+      oscap_rc=$?
+      echo '{{ ansible_user | default("ec2-user") }} ALL=(ALL) NOPASSWD: ALL' \
+        > /etc/sudoers.d/99-ansible-user
+      chmod 0440 /etc/sudoers.d/99-ansible-user
+      exit $oscap_rc
   register: rhel_hardening_stig_remediation
-  # oscap exit codes: 0=pass, 1=error, 2=some-fail (normal for STIG)
   failed_when: rhel_hardening_stig_remediation.rc == 1
   changed_when: rhel_hardening_stig_remediation.rc == 2
 
