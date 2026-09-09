@@ -31,6 +31,12 @@
     cmd: "createrepo {{ bastion_repo_base_dir }}/{{ bastion_repo_name }}"
   changed_when: true
 
+- name: restore selinux contexts on repo directory
+  ansible.builtin.command:
+    cmd: "restorecon -Rv {{ bastion_repo_base_dir }}"
+  register: bastion_repo_restorecon
+  changed_when: bastion_repo_restorecon.stdout | length > 0
+
 - name: disable httpd default port 80 listener
   ansible.builtin.lineinfile:
     path: /etc/httpd/conf/httpd.conf

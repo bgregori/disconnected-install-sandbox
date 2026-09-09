@@ -9,6 +9,10 @@ Listen {{ bastion_repo_port }}
         Require all granted
     </Directory>
 
+    <Location />
+        Require all granted
+    </Location>
+
     ErrorLog /var/log/httpd/repo-error.log
     CustomLog /var/log/httpd/repo-access.log combined
 </VirtualHost>
