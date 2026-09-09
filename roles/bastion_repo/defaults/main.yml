@@ -7,11 +7,12 @@ bastion_repo_packages:
   # STIG/hardening
   - openscap-scanner
   - scap-security-guide
+  - libxslt
   # DNS
   - bind
   - bind-utils
-  # HAProxy (downloaded here, installed on bastion itself)
-  - haproxy
+  # NTP
+  - chrony
   # General utilities
   - tmux
   - tcpdump

@@ -1,5 +1,5 @@
 ---
-# Phase 2 — Configure RHEL 9 services on provisioned hosts
+# Phase 2 - Configure RHEL 9 services on provisioned hosts
 # Requires: Phase 1 complete, dynamic inventory populated
 # Connection: SSH via bastion ProxyCommand
 
@@ -79,7 +79,7 @@
   roles:
     - role: bastion_haproxy
 
-# Step 2.7: Create Route53 records (runs on localhost)
+# Step 2.6: Create Route53 records (runs on localhost)
 - name: create route53 dns records
   hosts: localhost
   connection: local
@@ -88,19 +88,19 @@
   roles:
     - role: infra_route53
 
-# Step 2.8: Apply STIG on all hosts (after services are configured)
+# Step 2.7: Apply STIG - private hosts first while bastion repo is still serving
+- name: apply stig on private hosts
+  hosts: role_services:role_registry
+  gather_facts: false
+  roles:
+    - role: rhel_hardening
+      rhel_hardening_enable_fips: false
+
 - name: apply stig on bastion
   hosts: role_bastion
   gather_facts: false
   vars:
     ansible_ssh_common_args: ""
-  roles:
-    - role: rhel_hardening
-      rhel_hardening_enable_fips: false
-
-- name: apply stig on private hosts
-  hosts: role_services:role_registry
-  gather_facts: false
   roles:
     - role: rhel_hardening
       rhel_hardening_enable_fips: false
