@@ -31,6 +31,13 @@
     cmd: "createrepo {{ bastion_repo_base_dir }}/{{ bastion_repo_name }}"
   changed_when: true
 
+- name: disable httpd default port 80 listener
+  ansible.builtin.lineinfile:
+    path: /etc/httpd/conf/httpd.conf
+    regexp: '^Listen 80'
+    state: absent
+  notify: restart httpd
+
 - name: configure httpd to listen on repo port
   ansible.builtin.template:
     src: repo-httpd.conf.j2
