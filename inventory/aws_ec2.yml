@@ -1,0 +1,15 @@
+---
+plugin: amazon.aws.aws_ec2
+regions:
+  - "{{ lookup('env', 'AWS_REGION') | default('us-east-2', true) }}"
+filters:
+  tag:Project: disconnected-sandbox
+  instance-state-name: running
+keyed_groups:
+  - key: tags.sandbox_role
+    prefix: role
+    separator: "_"
+hostnames:
+  - private-ip-address
+compose:
+  ansible_host: private_ip_address

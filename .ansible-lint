@@ -1,0 +1,15 @@
+---
+skip_list:
+  - yaml[line-length]
+  - name[casing]
+
+warn_list:
+  - experimental
+
+enable_list:
+  - fqcn
+  - no-changed-when
+  - no-handler
+
+use_default_rules: true
+offline: false

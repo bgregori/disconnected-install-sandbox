@@ -1,0 +1,29 @@
+Host bastion-sandbox
+    HostName {{ bastion_eip }}
+    User {{ infra_ssh_config_user }}
+    IdentityFile {{ infra_ssh_config_key_path }}
+    StrictHostKeyChecking accept-new
+
+Host services-sandbox
+    HostName {{ services_private_ip }}
+    User {{ infra_ssh_config_user }}
+    IdentityFile {{ infra_ssh_config_key_path }}
+    ProxyCommand ssh -W %h:%p bastion-sandbox
+    StrictHostKeyChecking accept-new
+
+Host registry-sandbox
+    HostName {{ registry_private_ip }}
+    User {{ infra_ssh_config_user }}
+    IdentityFile {{ infra_ssh_config_key_path }}
+    ProxyCommand ssh -W %h:%p bastion-sandbox
+    StrictHostKeyChecking accept-new
+
+{% for ip in ocp_node_ips %}
+Host ocp-node-{{ loop.index0 }}-sandbox
+    HostName {{ ip }}
+    User {{ infra_ssh_config_user }}
+    IdentityFile {{ infra_ssh_config_key_path }}
+    ProxyCommand ssh -W %h:%p bastion-sandbox
+    StrictHostKeyChecking accept-new
+
+{% endfor %}

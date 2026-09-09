@@ -1,0 +1,35 @@
+---
+- name: install chrony
+  ansible.builtin.dnf:
+    name: chrony
+    state: present
+
+- name: configure chrony as local ntp server
+  ansible.builtin.template:
+    src: chrony-server.conf.j2
+    dest: /etc/chrony.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart chronyd
+
+- name: enable and start chronyd
+  ansible.builtin.systemd:
+    name: chronyd
+    enabled: true
+    state: started
+
+- name: open firewall for ntp
+  ansible.posix.firewalld:
+    service: ntp
+    permanent: true
+    immediate: true
+    state: enabled
+  ignore_errors: true
+
+- name: validate chrony is serving time
+  ansible.builtin.command:
+    cmd: chronyc tracking
+  register: chrony_validate
+  changed_when: false
+  failed_when: "'Reference ID' not in chrony_validate.stdout"

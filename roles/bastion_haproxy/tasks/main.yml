@@ -1,0 +1,40 @@
+---
+- name: install haproxy
+  ansible.builtin.dnf:
+    name: haproxy
+    state: present
+
+- name: generate haproxy configuration
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: "0644"
+    validate: haproxy -c -f %s
+  notify: restart haproxy
+
+- name: allow haproxy to bind to any port
+  ansible.builtin.command:
+    cmd: setsebool -P haproxy_connect_any 1
+  register: sebool_result
+  changed_when: sebool_result.rc == 0
+  failed_when: false
+
+- name: enable and start haproxy
+  ansible.builtin.systemd:
+    name: haproxy
+    enabled: true
+    state: started
+
+- name: open firewall for haproxy ports
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop:
+    - "6443"
+    - "443"
+    - "80"
+  ignore_errors: true

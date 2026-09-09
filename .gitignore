@@ -1,0 +1,31 @@
+# Ansible
+.ansible/
+*.retry
+
+# Secrets and keys
+*.pem
+*.key
+!roles/*/templates/*.j2
+.vault_pass
+vault-password-file
+pull-secret.json
+pull-secret.txt
+.env
+.env.*
+
+# Staged RPM bundles
+files/rpms/*.rpm
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# Test frameworks
+.vagrant/
+.molecule/
+
+# Static inventory (dynamic only)
+inventory/static_hosts

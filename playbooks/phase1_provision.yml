@@ -1,0 +1,50 @@
+---
+- name: Phase 1 — provision AWS infrastructure for disconnected sandbox
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  pre_tasks:
+    - name: validate required variables
+      ansible.builtin.assert:
+        that:
+          - aws_region is defined and aws_region | length > 0
+          - sandbox_domain is defined and sandbox_domain | length > 0
+          - admin_cidr is defined and admin_cidr | length > 0
+        fail_msg: >-
+          Missing required variables. Run with:
+          ansible-playbook playbooks/phase1_provision.yml
+          -e aws_region=us-east-2
+          -e sandbox_domain=sandboxNNNN.opentlc.com
+          -e admin_cidr=$(curl -s ifconfig.me)/32
+
+    - name: validate aws credentials are available
+      amazon.aws.sts_caller_identity:
+        region: "{{ aws_region }}"
+      register: aws_identity
+
+    - name: display aws account info
+      ansible.builtin.debug:
+        msg: "Authenticated as {{ aws_identity.arn }} in region {{ aws_region }}"
+
+  roles:
+    - role: infra_vpc
+    - role: infra_security_groups
+    - role: infra_ec2
+    - role: infra_ssh_config
+
+  post_tasks:
+    - name: phase 1 summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Phase 1 Complete ==="
+          - "VPC: {{ vpc_id }}"
+          - "Bastion EIP: {{ bastion_eip }}"
+          - "Domain: {{ cluster_domain }}"
+          - ""
+          - "SSH config: {{ infra_ssh_config_file | default('~/.ssh/config.d/disconnected-sandbox') }}"
+          - "Test bastion: ssh bastion-sandbox hostname"
+          - "Test private: ssh services-sandbox hostname"
+          - ""
+          - "Next: ansible-playbook playbooks/phase2_configure.yml -i inventory/aws_ec2.yml"

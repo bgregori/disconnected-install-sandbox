@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: bastion_repo
+  description: Set up bastion as a local yum repo for air-gapped private hosts
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+dependencies: []

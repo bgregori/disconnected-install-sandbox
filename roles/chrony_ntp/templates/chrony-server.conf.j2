@@ -1,0 +1,8 @@
+# Air-gapped NTP server — no upstream sources, local clock reference
+local stratum {{ chrony_ntp_local_stratum }}
+allow {{ chrony_ntp_allow_subnet }}
+
+driftfile /var/lib/chrony/drift
+makestep 1.0 3
+rtcsync
+logdir /var/log/chrony

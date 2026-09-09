@@ -1,0 +1,63 @@
+global
+    log         127.0.0.1 local2
+    chroot      /var/lib/haproxy
+    pidfile     /var/run/haproxy.pid
+    maxconn     4000
+    user        haproxy
+    group       haproxy
+    daemon
+    stats socket /var/lib/haproxy/stats
+
+defaults
+    mode                    tcp
+    log                     global
+    option                  tcplog
+    option                  dontlognull
+    retries                 3
+    timeout http-request    10s
+    timeout queue           1m
+    timeout connect         10s
+    timeout client          1m
+    timeout server          1m
+    timeout check           10s
+    maxconn                 3000
+
+# Kubernetes API — TCP passthrough
+frontend api
+    bind *:6443
+    default_backend ocp-api
+
+backend ocp-api
+    balance roundrobin
+{% for ip in bastion_haproxy_ocp_node_ips %}
+    server node-{{ loop.index0 }} {{ ip }}:6443 check
+{% endfor %}
+
+# OCP apps ingress — HTTPS TCP passthrough
+frontend apps-https
+    bind *:443
+    default_backend ocp-apps-https
+
+backend ocp-apps-https
+    balance roundrobin
+{% for ip in bastion_haproxy_ocp_node_ips %}
+    server node-{{ loop.index0 }} {{ ip }}:443 check
+{% endfor %}
+
+# OCP apps ingress — HTTP
+frontend apps-http
+    bind *:80
+    default_backend ocp-apps-http
+
+backend ocp-apps-http
+    balance roundrobin
+{% for ip in bastion_haproxy_ocp_node_ips %}
+    server node-{{ loop.index0 }} {{ ip }}:80 check
+{% endfor %}
+
+# Stats (local only)
+listen stats
+    bind 127.0.0.1:{{ bastion_haproxy_stats_port }}
+    mode http
+    stats enable
+    stats uri /haproxy-stats

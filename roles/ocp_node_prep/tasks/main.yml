@@ -1,0 +1,45 @@
+---
+- name: configure bastion local repo
+  ansible.builtin.yum_repository:
+    name: bastion-local
+    description: Bastion Local Repository
+    baseurl: "{{ ocp_node_prep_bastion_repo_url }}"
+    enabled: true
+    gpgcheck: false
+
+- name: validate api dns resolution
+  ansible.builtin.command:
+    cmd: "dig +short {{ ocp_node_prep_api_fqdn }}"
+  register: dns_api_check
+  changed_when: false
+  failed_when: dns_api_check.stdout | trim | length == 0
+
+- name: validate wildcard apps dns resolution
+  ansible.builtin.command:
+    cmd: "dig +short {{ ocp_node_prep_apps_test_fqdn }}"
+  register: dns_apps_check
+  changed_when: false
+  failed_when: dns_apps_check.stdout | trim | length == 0
+
+- name: validate ntp synchronization
+  ansible.builtin.command:
+    cmd: chronyc tracking
+  register: ntp_check
+  changed_when: false
+  failed_when: "'Not synchronised' in ntp_check.stdout"
+
+- name: validate fips mode
+  ansible.builtin.command:
+    cmd: fips-mode-setup --check
+  register: fips_check
+  changed_when: false
+  failed_when: "'FIPS mode is enabled' not in fips_check.stdout"
+  when: rhel_hardening_enable_fips | default(true)
+
+- name: display node readiness
+  ansible.builtin.debug:
+    msg:
+      - "Node {{ inventory_hostname }} is ready"
+      - "DNS: {{ dns_api_check.stdout | trim }}"
+      - "NTP: synchronized"
+      - "FIPS: {{ fips_check.stdout | default('not checked') | trim }}"

@@ -1,0 +1,6 @@
+---
+infra_route53_region: "{{ aws_region }}"
+infra_route53_zone: "{{ sandbox_domain }}"
+infra_route53_cluster_name: "{{ cluster_name }}"
+infra_route53_bastion_eip: "{{ bastion_eip }}"
+infra_route53_ttl: 300

@@ -1,0 +1,52 @@
+---
+- name: validate required facts from upstream roles
+  ansible.builtin.assert:
+    that:
+      - vpc_id is defined
+      - public_subnet_id is defined
+      - private_subnet_id is defined
+      - sg_bastion_id is defined
+      - sg_services_id is defined
+      - sg_registry_id is defined
+      - sg_ocp_nodes_id is defined
+    fail_msg: "Run infra_vpc and infra_security_groups before infra_ec2"
+
+- name: find latest rhel 9 ami
+  amazon.aws.ec2_ami_info:
+    region: "{{ infra_ec2_region }}"
+    owners:
+      - "{{ infra_ec2_ami_owner }}"
+    filters:
+      name: "{{ infra_ec2_ami_name_filter }}"
+      architecture: x86_64
+      state: available
+  register: ami_result
+
+- name: select most recent ami
+  ansible.builtin.set_fact:
+    rhel9_ami_id: "{{ (ami_result.images | sort(attribute='creation_date') | last).image_id }}"
+
+- name: create ec2 key pair
+  amazon.aws.ec2_key:
+    name: "{{ infra_ec2_key_name }}"
+    region: "{{ infra_ec2_region }}"
+    state: present
+    tags:
+      Project: "{{ infra_ec2_project_tag }}"
+      Environment: sandbox
+  register: key_pair_result
+
+- name: save private key to local file
+  ansible.builtin.copy:
+    content: "{{ key_pair_result.key.private_key }}"
+    dest: "{{ infra_ec2_key_path }}"
+    mode: "0600"
+  when: key_pair_result.changed
+  delegate_to: localhost
+  become: false
+
+- name: include bastion provisioning
+  ansible.builtin.include_tasks: bastion.yml
+
+- name: include private host provisioning
+  ansible.builtin.include_tasks: private_hosts.yml

@@ -1,0 +1,18 @@
+---
+bastion_repo_port: "{{ bastion_repo_port }}"
+bastion_repo_base_dir: /var/www/html/repos
+bastion_repo_name: rhel9-local
+
+bastion_repo_packages:
+  # STIG/hardening
+  - openscap-scanner
+  - scap-security-guide
+  # DNS
+  - bind
+  - bind-utils
+  # HAProxy (downloaded here, installed on bastion itself)
+  - haproxy
+  # General utilities
+  - tmux
+  - tcpdump
+  - nmap-ncat

@@ -1,0 +1,93 @@
+---
+# Phase 2 — Configure RHEL 9 services on provisioned hosts
+# Requires: Phase 1 complete, dynamic inventory populated
+# Connection: SSH via bastion ProxyCommand
+
+# Step 2.0: Set up bastion as local yum repo + content relay
+- name: configure bastion as package repo
+  hosts: role_bastion
+  gather_facts: true
+  vars:
+    ansible_ssh_common_args: ""
+  roles:
+    - role: bastion_repo
+
+# Step 2.1: Enable FIPS on all hosts (requires reboot)
+- name: enable fips on bastion
+  hosts: role_bastion
+  gather_facts: false
+  vars:
+    ansible_ssh_common_args: ""
+  roles:
+    - role: rhel_hardening
+      rhel_hardening_apply_stig: false
+
+- name: enable fips on private hosts
+  hosts: role_services:role_registry:role_ocp_node
+  gather_facts: false
+  roles:
+    - role: rhel_hardening
+      rhel_hardening_apply_stig: false
+
+# Step 2.2: Configure DNS server
+- name: configure bind dns on services host
+  hosts: role_services
+  gather_facts: true
+  roles:
+    - role: bind_dns
+
+# Step 2.3: Configure NTP server
+- name: configure chrony ntp on services host
+  hosts: role_services
+  gather_facts: false
+  roles:
+    - role: chrony_ntp
+
+# Step 2.4: Configure DNS/NTP clients on all private hosts
+- name: configure dns and ntp clients
+  hosts: role_services:role_registry:role_ocp_node
+  gather_facts: false
+  roles:
+    - role: common_client
+
+# Step 2.5: Configure HAProxy ingress on bastion
+- name: configure bastion haproxy
+  hosts: role_bastion
+  gather_facts: false
+  vars:
+    ansible_ssh_common_args: ""
+  roles:
+    - role: bastion_haproxy
+
+# Step 2.7: Create Route53 records (runs on localhost)
+- name: create route53 dns records
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  roles:
+    - role: infra_route53
+
+# Step 2.8: Apply STIG on all hosts (after services are configured)
+- name: apply stig on bastion
+  hosts: role_bastion
+  gather_facts: false
+  vars:
+    ansible_ssh_common_args: ""
+  roles:
+    - role: rhel_hardening
+      rhel_hardening_enable_fips: false
+
+- name: apply stig on private hosts
+  hosts: role_services:role_registry:role_ocp_node
+  gather_facts: false
+  roles:
+    - role: rhel_hardening
+      rhel_hardening_enable_fips: false
+
+# Step 2.9: Prepare OCP nodes and validate everything
+- name: prepare ocp nodes
+  hosts: role_ocp_node
+  gather_facts: false
+  roles:
+    - role: ocp_node_prep

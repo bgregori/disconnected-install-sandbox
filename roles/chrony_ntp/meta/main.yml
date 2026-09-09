@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: chrony_ntp
+  description: Configure Chrony as NTP server in air-gapped mode (local stratum)
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+dependencies: []

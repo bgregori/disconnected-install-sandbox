@@ -1,0 +1,35 @@
+---
+- name: configure dns resolver
+  ansible.builtin.template:
+    src: resolv.conf.j2
+    dest: /etc/resolv.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: disable networkmanager dns management
+  ansible.builtin.copy:
+    content: |
+      [main]
+      dns=none
+    dest: /etc/NetworkManager/conf.d/90-dns-none.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload networkmanager
+
+- name: configure chrony client
+  ansible.builtin.template:
+    src: chrony-client.conf.j2
+    dest: /etc/chrony.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: "'role_services' not in group_names"
+  notify: restart chronyd client
+
+- name: restart chronyd for client config
+  ansible.builtin.systemd:
+    name: chronyd
+    state: restarted
+  when: "'role_services' not in group_names"

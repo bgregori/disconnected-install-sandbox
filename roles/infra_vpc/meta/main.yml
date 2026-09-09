@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: infra_vpc
+  description: Provision VPC, subnets, IGW, and route tables for disconnected sandbox
+  min_ansible_version: "2.15"
+  platforms:
+    - name: GenericCloud
+      versions:
+        - all
+dependencies: []

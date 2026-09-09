@@ -1,0 +1,5 @@
+---
+ocp_node_prep_bastion_repo_url: "http://{{ bastion_private_ip }}:{{ bastion_repo_port }}/rhel9-local"
+ocp_node_prep_api_fqdn: "api.{{ cluster_domain }}"
+ocp_node_prep_apps_test_fqdn: "console-openshift-console.apps.{{ cluster_domain }}"
+ocp_node_prep_ntp_server: "{{ services_private_ip }}"

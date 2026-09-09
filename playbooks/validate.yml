@@ -1,0 +1,148 @@
+---
+- name: Validate disconnected sandbox — end-to-end checks
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    - name: check fips mode
+      ansible.builtin.command:
+        cmd: fips-mode-setup --check
+      register: fips_status
+      changed_when: false
+      failed_when: false
+
+    - name: report fips status
+      ansible.builtin.debug:
+        msg: "FIPS: {{ fips_status.stdout | trim }}"
+
+- name: validate air-gap on private hosts
+  hosts: role_services:role_registry:role_ocp_node
+  gather_facts: false
+
+  tasks:
+    - name: verify no internet connectivity
+      ansible.builtin.command:
+        cmd: curl -s --connect-timeout 5 https://google.com
+      register: internet_check
+      failed_when: internet_check.rc == 0
+      changed_when: false
+
+    - name: confirm air-gap intact
+      ansible.builtin.debug:
+        msg: "Air-gap confirmed — no internet connectivity from {{ inventory_hostname }}"
+
+- name: validate dns service
+  hosts: role_services:role_registry:role_ocp_node
+  gather_facts: false
+
+  tasks:
+    - name: resolve api endpoint
+      ansible.builtin.command:
+        cmd: "dig +short api.{{ cluster_domain }}"
+      register: dns_api
+      changed_when: false
+      failed_when: dns_api.stdout | trim | length == 0
+
+    - name: resolve wildcard apps
+      ansible.builtin.command:
+        cmd: "dig +short test.apps.{{ cluster_domain }}"
+      register: dns_apps
+      changed_when: false
+      failed_when: dns_apps.stdout | trim | length == 0
+
+    - name: resolve registry
+      ansible.builtin.command:
+        cmd: "dig +short registry.{{ cluster_domain }}"
+      register: dns_registry
+      changed_when: false
+      failed_when: dns_registry.stdout | trim | length == 0
+
+- name: validate ntp service
+  hosts: role_services:role_registry:role_ocp_node
+  gather_facts: false
+
+  tasks:
+    - name: check chrony sync status
+      ansible.builtin.command:
+        cmd: chronyc tracking
+      register: ntp_status
+      changed_when: false
+
+    - name: report ntp status
+      ansible.builtin.debug:
+        msg: "NTP: {{ ntp_status.stdout_lines[0] | default('unknown') }}"
+
+- name: validate haproxy on bastion
+  hosts: role_bastion
+  gather_facts: false
+  vars:
+    ansible_ssh_common_args: ""
+
+  tasks:
+    - name: check haproxy stats
+      ansible.builtin.command:
+        cmd: >-
+          curl -s http://127.0.0.1:9000/haproxy-stats
+      register: haproxy_status
+      changed_when: false
+      failed_when: haproxy_status.rc != 0
+
+    - name: check haproxy is listening
+      ansible.builtin.command:
+        cmd: ss -tlnp
+      register: haproxy_ports
+      changed_when: false
+
+    - name: assert haproxy ports are bound
+      ansible.builtin.assert:
+        that:
+          - "':6443' in haproxy_ports.stdout"
+          - "':443' in haproxy_ports.stdout"
+        fail_msg: "HAProxy is not listening on required ports"
+        success_msg: "HAProxy is bound to :6443 and :443"
+
+- name: validate route53 records
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  tasks:
+    - name: resolve api via public dns
+      ansible.builtin.command:
+        cmd: "dig +short api.{{ cluster_name }}.{{ sandbox_domain }}"
+      register: r53_api
+      changed_when: false
+
+    - name: resolve wildcard apps via public dns
+      ansible.builtin.command:
+        cmd: "dig +short test.apps.{{ cluster_name }}.{{ sandbox_domain }}"
+      register: r53_apps
+      changed_when: false
+
+    - name: display route53 validation
+      ansible.builtin.debug:
+        msg:
+          - "api.{{ cluster_name }}.{{ sandbox_domain }} → {{ r53_api.stdout | trim }}"
+          - "*.apps.{{ cluster_name }}.{{ sandbox_domain }} → {{ r53_apps.stdout | trim }}"
+
+- name: summary
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  tasks:
+    - name: display sandbox readiness summary
+      ansible.builtin.debug:
+        msg:
+          - "=== Disconnected Sandbox Validation Complete ==="
+          - ""
+          - "Environment: {{ cluster_domain }}"
+          - "Bastion EIP: {{ bastion_eip | default('see Phase 1 output') }}"
+          - ""
+          - "API endpoint:     https://api.{{ cluster_domain }}:6443"
+          - "Console:          https://console-openshift-console.apps.{{ cluster_domain }}"
+          - "Registry host:    registry.{{ cluster_domain }} (not yet configured — use mirror-registry)"
+          - ""
+          - "The sandbox is ready for disconnected OpenShift 4 installation."

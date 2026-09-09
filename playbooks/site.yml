@@ -1,0 +1,6 @@
+---
+- name: Phase 1 — provision AWS infrastructure
+  ansible.builtin.import_playbook: phase1_provision.yml
+
+- name: Phase 2 — configure RHEL 9 services
+  ansible.builtin.import_playbook: phase2_configure.yml

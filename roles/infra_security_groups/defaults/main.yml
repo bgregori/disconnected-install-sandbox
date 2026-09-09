@@ -1,0 +1,11 @@
+---
+infra_sg_region: "{{ aws_region }}"
+infra_sg_project_tag: "{{ project_tag }}"
+infra_sg_vpc_id: "{{ vpc_id }}"
+infra_sg_private_subnet_cidr: "{{ private_subnet_cidr }}"
+infra_sg_vpc_cidr: "{{ vpc_cidr }}"
+infra_sg_admin_cidr: "{{ admin_cidr }}"
+infra_sg_services_ip: "{{ services_private_ip }}"
+infra_sg_registry_ip: "{{ registry_private_ip }}"
+infra_sg_bastion_ip: "{{ bastion_private_ip }}"
+infra_sg_bastion_repo_port: "{{ bastion_repo_port }}"

@@ -1,0 +1,36 @@
+---
+- name: validate required facts
+  ansible.builtin.assert:
+    that:
+      - bastion_eip is defined
+    fail_msg: "bastion_eip must be set (run infra_ec2 first)"
+
+- name: ensure ssh config.d directory exists
+  ansible.builtin.file:
+    path: "{{ infra_ssh_config_dir }}/config.d"
+    state: directory
+    mode: "0700"
+  become: false
+
+- name: generate ssh config for sandbox hosts
+  ansible.builtin.template:
+    src: ssh_config.j2
+    dest: "{{ infra_ssh_config_file }}"
+    mode: "0600"
+  become: false
+
+- name: ensure main ssh config includes config.d
+  ansible.builtin.lineinfile:
+    path: "{{ infra_ssh_config_dir }}/config"
+    line: "Include config.d/*"
+    insertbefore: BOF
+    create: true
+    mode: "0600"
+  become: false
+
+- name: display connection info
+  ansible.builtin.debug:
+    msg:
+      - "Bastion EIP: {{ bastion_eip }}"
+      - "SSH config written to: {{ infra_ssh_config_file }}"
+      - "Test: ssh bastion-sandbox hostname"

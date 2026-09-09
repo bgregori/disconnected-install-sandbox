@@ -1,0 +1,44 @@
+---
+- name: launch bastion instance
+  amazon.aws.ec2_instance:
+    name: "{{ infra_ec2_project_tag }}-bastion"
+    instance_type: "{{ bastion_instance_type }}"
+    image_id: "{{ rhel9_ami_id }}"
+    key_name: "{{ infra_ec2_key_name }}"
+    region: "{{ infra_ec2_region }}"
+    vpc_subnet_id: "{{ public_subnet_id }}"
+    security_groups:
+      - "{{ sg_bastion_id }}"
+    network:
+      assign_public_ip: true
+      private_ip_address: "{{ bastion_private_ip }}"
+    volumes:
+      - device_name: /dev/sda1
+        ebs:
+          volume_size: "{{ bastion_root_volume_size }}"
+          volume_type: gp3
+          delete_on_termination: true
+    tags:
+      Project: "{{ infra_ec2_project_tag }}"
+      Environment: sandbox
+      sandbox_role: bastion
+    wait: true
+    state: running
+  register: bastion_result
+
+- name: allocate elastic ip for bastion
+  amazon.aws.ec2_eip:
+    instance_id: "{{ bastion_result.instances[0].instance_id }}"
+    region: "{{ infra_ec2_region }}"
+    in_vpc: true
+    tags:
+      Name: "{{ infra_ec2_project_tag }}-bastion-eip"
+      Project: "{{ infra_ec2_project_tag }}"
+      Environment: sandbox
+    state: present
+  register: bastion_eip_result
+
+- name: export bastion facts
+  ansible.builtin.set_fact:
+    bastion_instance_id: "{{ bastion_result.instances[0].instance_id }}"
+    bastion_eip: "{{ bastion_eip_result.public_ip }}"

@@ -1,0 +1,4 @@
+---
+- name: reboot for hardening
+  ansible.builtin.reboot:
+    reboot_timeout: "{{ rhel_hardening_reboot_timeout | default(600) }}"

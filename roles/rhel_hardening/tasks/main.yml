@@ -1,0 +1,8 @@
+---
+- name: include fips enablement
+  ansible.builtin.include_tasks: fips.yml
+  when: rhel_hardening_enable_fips
+
+- name: include stig application
+  ansible.builtin.include_tasks: stig.yml
+  when: rhel_hardening_apply_stig

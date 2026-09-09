@@ -1,0 +1,71 @@
+---
+- name: configure bastion local repo
+  ansible.builtin.yum_repository:
+    name: bastion-local
+    description: Bastion Local Repository
+    baseurl: "{{ bind_dns_bastion_repo_url }}"
+    enabled: true
+    gpgcheck: false
+
+- name: install bind packages
+  ansible.builtin.dnf:
+    name:
+      - bind
+      - bind-utils
+    state: present
+
+- name: generate named.conf
+  ansible.builtin.template:
+    src: named.conf.j2
+    dest: /etc/named.conf
+    owner: root
+    group: named
+    mode: "0640"
+    validate: named-checkconf %s
+  notify: restart named
+
+- name: generate forward zone file
+  ansible.builtin.template:
+    src: db.forward.j2
+    dest: "/var/named/db.{{ bind_dns_zone }}"
+    owner: root
+    group: named
+    mode: "0640"
+  notify: restart named
+
+- name: generate private subnet reverse zone file
+  ansible.builtin.template:
+    src: db.reverse.j2
+    dest: "/var/named/db.{{ bind_dns_reverse_zone_private }}"
+    owner: root
+    group: named
+    mode: "0640"
+  notify: restart named
+
+- name: enable and start named
+  ansible.builtin.systemd:
+    name: named
+    enabled: true
+    state: started
+
+- name: open firewall for dns
+  ansible.posix.firewalld:
+    service: dns
+    permanent: true
+    immediate: true
+    state: enabled
+  ignore_errors: true
+
+- name: validate forward dns resolution
+  ansible.builtin.command:
+    cmd: "dig @{{ bind_dns_listen_ip }} api.{{ bind_dns_zone }} +short"
+  register: dns_validate
+  changed_when: false
+  failed_when: dns_validate.stdout | trim | length == 0
+
+- name: validate wildcard dns resolution
+  ansible.builtin.command:
+    cmd: "dig @{{ bind_dns_listen_ip }} test.apps.{{ bind_dns_zone }} +short"
+  register: dns_wildcard_validate
+  changed_when: false
+  failed_when: dns_wildcard_validate.stdout | trim | length == 0

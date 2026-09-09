@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: rhel_hardening
+  description: Enable FIPS 140-3 and apply DISA STIG on RHEL 9 hosts
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+dependencies: []

@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: ocp_node_prep
+  description: Prepare OCP nodes — trust registry CA, validate DNS/NTP/registry access
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+dependencies: []

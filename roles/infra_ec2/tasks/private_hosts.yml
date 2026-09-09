@@ -1,0 +1,90 @@
+---
+- name: launch services instance
+  amazon.aws.ec2_instance:
+    name: "{{ infra_ec2_project_tag }}-services"
+    instance_type: "{{ services_instance_type }}"
+    image_id: "{{ rhel9_ami_id }}"
+    key_name: "{{ infra_ec2_key_name }}"
+    region: "{{ infra_ec2_region }}"
+    vpc_subnet_id: "{{ private_subnet_id }}"
+    security_groups:
+      - "{{ sg_services_id }}"
+    network:
+      assign_public_ip: false
+      private_ip_address: "{{ services_private_ip }}"
+    volumes:
+      - device_name: /dev/sda1
+        ebs:
+          volume_size: "{{ services_root_volume_size }}"
+          volume_type: gp3
+          delete_on_termination: true
+    tags:
+      Project: "{{ infra_ec2_project_tag }}"
+      Environment: sandbox
+      sandbox_role: services
+    wait: true
+    state: running
+  register: services_result
+
+- name: launch registry instance
+  amazon.aws.ec2_instance:
+    name: "{{ infra_ec2_project_tag }}-registry"
+    instance_type: "{{ registry_instance_type }}"
+    image_id: "{{ rhel9_ami_id }}"
+    key_name: "{{ infra_ec2_key_name }}"
+    region: "{{ infra_ec2_region }}"
+    vpc_subnet_id: "{{ private_subnet_id }}"
+    security_groups:
+      - "{{ sg_registry_id }}"
+    network:
+      assign_public_ip: false
+      private_ip_address: "{{ registry_private_ip }}"
+    volumes:
+      - device_name: /dev/sda1
+        ebs:
+          volume_size: "{{ registry_root_volume_size }}"
+          volume_type: gp3
+          delete_on_termination: true
+      - device_name: /dev/sdf
+        ebs:
+          volume_size: "{{ registry_data_volume_size }}"
+          volume_type: gp3
+          delete_on_termination: true
+    tags:
+      Project: "{{ infra_ec2_project_tag }}"
+      Environment: sandbox
+      sandbox_role: registry
+    wait: true
+    state: running
+  register: registry_result
+
+- name: launch ocp node instances
+  amazon.aws.ec2_instance:
+    name: "{{ infra_ec2_project_tag }}-ocp-node-{{ idx }}"
+    instance_type: "{{ ocp_instance_type }}"
+    image_id: "{{ rhel9_ami_id }}"
+    key_name: "{{ infra_ec2_key_name }}"
+    region: "{{ infra_ec2_region }}"
+    vpc_subnet_id: "{{ private_subnet_id }}"
+    security_groups:
+      - "{{ sg_ocp_nodes_id }}"
+    network:
+      assign_public_ip: false
+      private_ip_address: "{{ item }}"
+    volumes:
+      - device_name: /dev/sda1
+        ebs:
+          volume_size: "{{ ocp_root_volume_size }}"
+          volume_type: gp3
+          delete_on_termination: true
+    tags:
+      Project: "{{ infra_ec2_project_tag }}"
+      Environment: sandbox
+      sandbox_role: ocp_node
+      ocp_node_index: "{{ idx }}"
+    wait: true
+    state: running
+  loop: "{{ ocp_node_ips }}"
+  loop_control:
+    index_var: idx
+  register: ocp_nodes_result

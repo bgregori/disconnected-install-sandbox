@@ -1,0 +1,6 @@
+---
+infra_vpc_cidr: "{{ vpc_cidr }}"
+infra_vpc_public_subnet_cidr: "{{ public_subnet_cidr }}"
+infra_vpc_private_subnet_cidr: "{{ private_subnet_cidr }}"
+infra_vpc_region: "{{ aws_region }}"
+infra_vpc_project_tag: "{{ project_tag }}"

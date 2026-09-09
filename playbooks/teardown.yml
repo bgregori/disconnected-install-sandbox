@@ -1,0 +1,182 @@
+---
+- name: Teardown — destroy all disconnected sandbox resources
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  pre_tasks:
+    - name: validate required variables
+      ansible.builtin.assert:
+        that:
+          - aws_region is defined and aws_region | length > 0
+          - sandbox_domain is defined and sandbox_domain | length > 0
+        fail_msg: >-
+          Missing required variables. Run with:
+          ansible-playbook playbooks/teardown.yml
+          -e aws_region=us-east-2
+          -e sandbox_domain=sandboxNNNN.opentlc.com
+
+  tasks:
+    # Step 1: Find all tagged resources
+    - name: find all sandbox ec2 instances
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Project": "{{ project_tag }}"
+          instance-state-name:
+            - running
+            - stopped
+      register: sandbox_instances
+
+    - name: find sandbox vpc
+      amazon.aws.ec2_vpc_net_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Project": "{{ project_tag }}"
+      register: sandbox_vpcs
+
+    # Step 2: Terminate instances
+    - name: terminate all sandbox instances
+      amazon.aws.ec2_instance:
+        instance_ids: "{{ sandbox_instances.instances | map(attribute='instance_id') | list }}"
+        region: "{{ aws_region }}"
+        state: absent
+        wait: true
+      when: sandbox_instances.instances | length > 0
+
+    # Step 3: Release Elastic IPs
+    - name: find sandbox elastic ips
+      amazon.aws.ec2_eip_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Project": "{{ project_tag }}"
+      register: sandbox_eips
+
+    - name: release elastic ips
+      amazon.aws.ec2_eip:
+        public_ip: "{{ item.public_ip }}"
+        region: "{{ aws_region }}"
+        state: absent
+      loop: "{{ sandbox_eips.addresses }}"
+      when: sandbox_eips.addresses | length > 0
+
+    # Step 4: Delete key pair
+    - name: delete ec2 key pair
+      amazon.aws.ec2_key:
+        name: "{{ ssh_key_name }}"
+        region: "{{ aws_region }}"
+        state: absent
+
+    # Step 5: Clean up Route53 records
+    - name: find hosted zone for sandbox domain
+      amazon.aws.route53_zone:
+        zone: "{{ sandbox_domain }}"
+        state: present
+      register: r53_zone
+      ignore_errors: true
+
+    - name: remove route53 api record
+      amazon.aws.route53:
+        zone: "{{ sandbox_domain }}"
+        record: "api.{{ cluster_name }}.{{ sandbox_domain }}"
+        type: A
+        state: absent
+      ignore_errors: true
+      when: r53_zone is not failed
+
+    - name: remove route53 wildcard apps record
+      amazon.aws.route53:
+        zone: "{{ sandbox_domain }}"
+        record: "*.apps.{{ cluster_name }}.{{ sandbox_domain }}"
+        type: A
+        state: absent
+      ignore_errors: true
+      when: r53_zone is not failed
+
+    # Step 6: Delete security groups (after instances are terminated)
+    - name: find sandbox security groups
+      amazon.aws.ec2_security_group_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Project": "{{ project_tag }}"
+      register: sandbox_sgs
+
+    - name: delete sandbox security groups
+      amazon.aws.ec2_security_group:
+        group_id: "{{ item.group_id }}"
+        region: "{{ aws_region }}"
+        state: absent
+      loop: "{{ sandbox_sgs.security_groups }}"
+      when: sandbox_sgs.security_groups | length > 0
+      ignore_errors: true
+
+    # Step 7: Delete subnets, IGW, route tables, VPC
+    - name: teardown vpc and all networking
+      when: sandbox_vpcs.vpcs | length > 0
+      block:
+        - name: set vpc id for teardown
+          ansible.builtin.set_fact:
+            teardown_vpc_id: "{{ sandbox_vpcs.vpcs[0].id }}"
+
+        - name: find sandbox subnets
+          amazon.aws.ec2_vpc_subnet_info:
+            region: "{{ aws_region }}"
+            filters:
+              vpc-id: "{{ teardown_vpc_id }}"
+              "tag:Project": "{{ project_tag }}"
+          register: sandbox_subnets
+
+        - name: delete subnets
+          amazon.aws.ec2_vpc_subnet:
+            vpc_id: "{{ teardown_vpc_id }}"
+            cidr: "{{ item.cidr_block }}"
+            region: "{{ aws_region }}"
+            state: absent
+          loop: "{{ sandbox_subnets.subnets }}"
+
+        - name: find and delete non-main route tables
+          amazon.aws.ec2_vpc_route_table_info:
+            region: "{{ aws_region }}"
+            filters:
+              vpc-id: "{{ teardown_vpc_id }}"
+              "tag:Project": "{{ project_tag }}"
+          register: sandbox_rts
+
+        - name: delete route tables
+          amazon.aws.ec2_vpc_route_table:
+            route_table_id: "{{ item.id }}"
+            vpc_id: "{{ teardown_vpc_id }}"
+            region: "{{ aws_region }}"
+            lookup: id
+            state: absent
+          loop: "{{ sandbox_rts.route_tables }}"
+          when: not item.associations | selectattr('main', 'defined') | selectattr('main') | list | length > 0
+          ignore_errors: true
+
+        - name: detach and delete internet gateway
+          amazon.aws.ec2_vpc_igw:
+            vpc_id: "{{ teardown_vpc_id }}"
+            region: "{{ aws_region }}"
+            state: absent
+
+        - name: delete vpc
+          amazon.aws.ec2_vpc_net:
+            vpc_id: "{{ teardown_vpc_id }}"
+            region: "{{ aws_region }}"
+            state: absent
+
+    # Step 8: Clean up local files
+    - name: remove local ssh key
+      ansible.builtin.file:
+        path: "{{ ssh_key_path }}"
+        state: absent
+
+    - name: remove ssh config stanza
+      ansible.builtin.file:
+        path: "~/.ssh/config.d/disconnected-sandbox"
+        state: absent
+
+    - name: teardown complete
+      ansible.builtin.debug:
+        msg: "All disconnected-sandbox resources destroyed in {{ aws_region }}"

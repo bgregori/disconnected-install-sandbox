@@ -1,0 +1,4 @@
+---
+common_client_dns_server: "{{ services_private_ip }}"
+common_client_ntp_server: "{{ services_private_ip }}"
+common_client_search_domain: "{{ cluster_domain }}"

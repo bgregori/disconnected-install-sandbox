@@ -1,0 +1,5 @@
+---
+infra_ssh_config_key_path: "{{ ssh_key_path }}"
+infra_ssh_config_user: ec2-user
+infra_ssh_config_dir: "~/.ssh"
+infra_ssh_config_file: "~/.ssh/config.d/disconnected-sandbox"

@@ -1,0 +1,49 @@
+---
+# Required variables — playbooks fail if these are not provided at runtime.
+# Pass via -e on the command line:
+#   -e aws_region=us-east-2
+#   -e sandbox_domain=sandbox2229.opentlc.com
+#   -e admin_cidr=$(curl -s ifconfig.me)/32
+#
+# AWS credentials must be exported as environment variables:
+#   export AWS_ACCESS_KEY_ID="AKIA..."
+#   export AWS_SECRET_ACCESS_KEY="wJalr..."
+
+# Networking
+vpc_cidr: "10.0.0.0/16"
+public_subnet_cidr: "10.0.1.0/24"
+private_subnet_cidr: "10.0.2.0/24"
+
+# Domain — cluster_domain is derived as {{ cluster_name }}.{{ sandbox_domain }}
+cluster_name: ocp
+
+# Tagging
+project_tag: disconnected-sandbox
+
+# SSH
+ssh_key_name: "{{ project_tag }}-key"
+ssh_key_path: "~/.ssh/{{ project_tag }}.pem"
+
+# Static private IPs
+bastion_private_ip: "10.0.1.10"
+services_private_ip: "10.0.2.10"
+registry_private_ip: "10.0.2.20"
+ocp_node_ips:
+  - "10.0.2.100"
+  - "10.0.2.101"
+  - "10.0.2.102"
+
+# Bastion local yum repo — serves packages to air-gapped private hosts
+bastion_repo_port: 8080
+
+# Hardening
+rhel_hardening_enable_fips: true
+rhel_hardening_apply_stig: true
+rhel_hardening_stig_profile: xccdf_org.ssgproject.content_profile_stig
+
+# Derived — used throughout roles and templates
+cluster_domain: "{{ cluster_name }}.{{ sandbox_domain }}"
+
+# Connection defaults for private hosts
+ansible_user: ec2-user
+ansible_ssh_private_key_file: "{{ ssh_key_path }}"

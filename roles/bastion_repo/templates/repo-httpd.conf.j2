@@ -1,0 +1,14 @@
+Listen {{ bastion_repo_port }}
+
+<VirtualHost *:{{ bastion_repo_port }}>
+    DocumentRoot "{{ bastion_repo_base_dir }}"
+
+    <Directory "{{ bastion_repo_base_dir }}">
+        Options Indexes FollowSymLinks
+        AllowOverride None
+        Require all granted
+    </Directory>
+
+    ErrorLog /var/log/httpd/repo-error.log
+    CustomLog /var/log/httpd/repo-access.log combined
+</VirtualHost>

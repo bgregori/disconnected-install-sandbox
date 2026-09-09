@@ -1,0 +1,48 @@
+---
+- name: validate required facts
+  ansible.builtin.assert:
+    that:
+      - infra_route53_bastion_eip is defined
+      - sandbox_domain is defined
+    fail_msg: "bastion_eip and sandbox_domain must be available"
+
+- name: create api route53 a record
+  amazon.aws.route53:
+    zone: "{{ infra_route53_zone }}"
+    record: "api.{{ infra_route53_cluster_name }}.{{ infra_route53_zone }}"
+    type: A
+    ttl: "{{ infra_route53_ttl }}"
+    value:
+      - "{{ infra_route53_bastion_eip }}"
+    overwrite: true
+    state: present
+    wait: true
+
+- name: create wildcard apps route53 a record
+  amazon.aws.route53:
+    zone: "{{ infra_route53_zone }}"
+    record: "*.apps.{{ infra_route53_cluster_name }}.{{ infra_route53_zone }}"
+    type: A
+    ttl: "{{ infra_route53_ttl }}"
+    value:
+      - "{{ infra_route53_bastion_eip }}"
+    overwrite: true
+    state: present
+    wait: true
+
+- name: validate api dns resolution
+  ansible.builtin.command:
+    cmd: >-
+      dig +short
+      api.{{ infra_route53_cluster_name }}.{{ infra_route53_zone }}
+  register: api_dns_check
+  changed_when: false
+  retries: 6
+  delay: 10
+  until: infra_route53_bastion_eip in api_dns_check.stdout
+
+- name: display route53 records
+  ansible.builtin.debug:
+    msg:
+      - "api.{{ infra_route53_cluster_name }}.{{ infra_route53_zone }} → {{ infra_route53_bastion_eip }}"
+      - "*.apps.{{ infra_route53_cluster_name }}.{{ infra_route53_zone }} → {{ infra_route53_bastion_eip }}"

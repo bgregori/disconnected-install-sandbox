@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: infra_ssh_config
+  description: Generate SSH config with ProxyCommand for bastion-proxied access to private hosts
+  min_ansible_version: "2.15"
+  platforms:
+    - name: GenericCloud
+      versions:
+        - all
+dependencies: []

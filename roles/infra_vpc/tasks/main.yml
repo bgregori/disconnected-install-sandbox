@@ -1,0 +1,111 @@
+---
+- name: validate required variables
+  ansible.builtin.assert:
+    that:
+      - aws_region is defined and aws_region | length > 0
+      - sandbox_domain is defined and sandbox_domain | length > 0
+    fail_msg: "aws_region and sandbox_domain must be provided via -e"
+
+- name: create vpc
+  amazon.aws.ec2_vpc_net:
+    name: "{{ infra_vpc_project_tag }}-vpc"
+    cidr_block: "{{ infra_vpc_cidr }}"
+    region: "{{ infra_vpc_region }}"
+    dns_support: true
+    dns_hostnames: true
+    tags:
+      Project: "{{ infra_vpc_project_tag }}"
+      Environment: sandbox
+    state: present
+  register: vpc_result
+
+- name: set vpc id fact
+  ansible.builtin.set_fact:
+    vpc_id: "{{ vpc_result.vpc.id }}"
+
+- name: create internet gateway
+  amazon.aws.ec2_vpc_igw:
+    vpc_id: "{{ vpc_id }}"
+    region: "{{ infra_vpc_region }}"
+    tags:
+      Name: "{{ infra_vpc_project_tag }}-igw"
+      Project: "{{ infra_vpc_project_tag }}"
+      Environment: sandbox
+    state: present
+  register: igw_result
+
+- name: create public subnet
+  amazon.aws.ec2_vpc_subnet:
+    vpc_id: "{{ vpc_id }}"
+    cidr: "{{ infra_vpc_public_subnet_cidr }}"
+    az: "{{ infra_vpc_region }}a"
+    region: "{{ infra_vpc_region }}"
+    map_public: true
+    tags:
+      Name: "{{ infra_vpc_project_tag }}-public"
+      Project: "{{ infra_vpc_project_tag }}"
+      Environment: sandbox
+    state: present
+  register: public_subnet_result
+
+- name: create private subnet
+  amazon.aws.ec2_vpc_subnet:
+    vpc_id: "{{ vpc_id }}"
+    cidr: "{{ infra_vpc_private_subnet_cidr }}"
+    az: "{{ infra_vpc_region }}a"
+    region: "{{ infra_vpc_region }}"
+    map_public: false
+    tags:
+      Name: "{{ infra_vpc_project_tag }}-private"
+      Project: "{{ infra_vpc_project_tag }}"
+      Environment: sandbox
+    state: present
+  register: private_subnet_result
+
+- name: create public route table
+  amazon.aws.ec2_vpc_route_table:
+    vpc_id: "{{ vpc_id }}"
+    region: "{{ infra_vpc_region }}"
+    subnets:
+      - "{{ public_subnet_result.subnet.id }}"
+    routes:
+      - dest: "0.0.0.0/0"
+        gateway_id: "{{ igw_result.gateway_id }}"
+    tags:
+      Name: "{{ infra_vpc_project_tag }}-public-rt"
+      Project: "{{ infra_vpc_project_tag }}"
+      Environment: sandbox
+    state: present
+
+- name: create private route table with no internet route
+  amazon.aws.ec2_vpc_route_table:
+    vpc_id: "{{ vpc_id }}"
+    region: "{{ infra_vpc_region }}"
+    subnets:
+      - "{{ private_subnet_result.subnet.id }}"
+    routes: []
+    purge_routes: true
+    tags:
+      Name: "{{ infra_vpc_project_tag }}-private-rt"
+      Project: "{{ infra_vpc_project_tag }}"
+      Environment: sandbox
+    state: present
+  register: private_rt_result
+
+- name: validate air-gap — private route table has no default route
+  ansible.builtin.assert:
+    that:
+      - >-
+        private_rt_result.route_table.routes
+        | selectattr('destination_cidr_block', 'defined')
+        | selectattr('destination_cidr_block', 'equalto', '0.0.0.0/0')
+        | list | length == 0
+    fail_msg: "FATAL: Private route table has a default route — air-gap violated"
+    success_msg: "Private route table confirmed air-gapped (no default route)"
+
+- name: export networking facts for downstream roles
+  ansible.builtin.set_fact:
+    vpc_id: "{{ vpc_result.vpc.id }}"
+    igw_id: "{{ igw_result.gateway_id }}"
+    public_subnet_id: "{{ public_subnet_result.subnet.id }}"
+    private_subnet_id: "{{ private_subnet_result.subnet.id }}"

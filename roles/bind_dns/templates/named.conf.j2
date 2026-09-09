@@ -1,0 +1,34 @@
+options {
+    listen-on port 53 { {{ bind_dns_listen_ip }}; 127.0.0.1; };
+    listen-on-v6 { none; };
+    directory "/var/named";
+    dump-file "/var/named/data/cache_dump.db";
+    statistics-file "/var/named/data/named_stats.txt";
+    memstatistics-file "/var/named/data/named_mem_stats.txt";
+    allow-query { {{ bind_dns_allow_query_cidr }}; localhost; };
+    recursion no;
+    dnssec-validation no;
+    managed-keys-directory "/var/named/dynamic";
+    pid-file "/run/named/named.pid";
+    session-keyfile "/run/named/session.key";
+};
+
+logging {
+    channel default_log {
+        file "/var/named/data/named.run" versions 3 size 5m;
+        severity dynamic;
+    };
+    category default { default_log; };
+};
+
+zone "{{ bind_dns_zone }}" IN {
+    type master;
+    file "db.{{ bind_dns_zone }}";
+    allow-update { none; };
+};
+
+zone "{{ bind_dns_reverse_zone_private }}" IN {
+    type master;
+    file "db.{{ bind_dns_reverse_zone_private }}";
+    allow-update { none; };
+};
