@@ -37,4 +37,4 @@
     - "6443"
     - "443"
     - "80"
-  ignore_errors: true
+  failed_when: false

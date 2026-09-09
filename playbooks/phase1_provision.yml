@@ -20,7 +20,7 @@
           -e admin_cidr=$(curl -s ifconfig.me)/32
 
     - name: validate aws credentials are available
-      amazon.aws.sts_caller_identity:
+      amazon.aws.aws_caller_info:
         region: "{{ aws_region }}"
       register: aws_identity
 

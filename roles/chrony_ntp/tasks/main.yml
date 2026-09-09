@@ -25,7 +25,7 @@
     permanent: true
     immediate: true
     state: enabled
-  ignore_errors: true
+  failed_when: false
 
 - name: validate chrony is serving time
   ansible.builtin.command:

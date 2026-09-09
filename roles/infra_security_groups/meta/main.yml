@@ -1,5 +1,6 @@
 ---
 galaxy_info:
+  author: bgregori
   role_name: infra_security_groups
   description: Create security groups for bastion, services, registry, and OCP nodes
   min_ansible_version: "2.15"

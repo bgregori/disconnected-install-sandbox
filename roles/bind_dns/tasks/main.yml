@@ -54,7 +54,7 @@
     permanent: true
     immediate: true
     state: enabled
-  ignore_errors: true
+  failed_when: false
 
 - name: validate forward dns resolution
   ansible.builtin.command:

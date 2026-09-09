@@ -1,5 +1,6 @@
 ---
 galaxy_info:
+  author: bgregori
   role_name: bastion_haproxy
   description: HAProxy L4 reverse proxy for OCP API and apps ingress
   min_ansible_version: "2.15"

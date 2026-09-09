@@ -1,5 +1,6 @@
 ---
 galaxy_info:
+  author: bgregori
   role_name: infra_route53
   description: Create Route53 A records for OCP API and wildcard apps
   min_ansible_version: "2.15"

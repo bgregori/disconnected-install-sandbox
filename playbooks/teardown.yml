@@ -74,7 +74,7 @@
         zone: "{{ sandbox_domain }}"
         state: present
       register: r53_zone
-      ignore_errors: true
+      failed_when: false
 
     - name: remove route53 api record
       amazon.aws.route53:
@@ -82,7 +82,7 @@
         record: "api.{{ cluster_name }}.{{ sandbox_domain }}"
         type: A
         state: absent
-      ignore_errors: true
+      failed_when: false
       when: r53_zone is not failed
 
     - name: remove route53 wildcard apps record
@@ -91,7 +91,7 @@
         record: "*.apps.{{ cluster_name }}.{{ sandbox_domain }}"
         type: A
         state: absent
-      ignore_errors: true
+      failed_when: false
       when: r53_zone is not failed
 
     # Step 6: Delete security groups (after instances are terminated)
@@ -109,7 +109,7 @@
         state: absent
       loop: "{{ sandbox_sgs.security_groups }}"
       when: sandbox_sgs.security_groups | length > 0
-      ignore_errors: true
+      failed_when: false
 
     # Step 7: Delete subnets, IGW, route tables, VPC
     - name: teardown vpc and all networking
@@ -152,7 +152,7 @@
             state: absent
           loop: "{{ sandbox_rts.route_tables }}"
           when: not item.associations | selectattr('main', 'defined') | selectattr('main') | list | length > 0
-          ignore_errors: true
+          failed_when: false
 
         - name: detach and delete internet gateway
           amazon.aws.ec2_vpc_igw:

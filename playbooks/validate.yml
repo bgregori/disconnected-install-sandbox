@@ -21,11 +21,13 @@
 
   tasks:
     - name: verify no internet connectivity
-      ansible.builtin.command:
-        cmd: curl -s --connect-timeout 5 https://google.com
+      ansible.builtin.wait_for:
+        host: google.com
+        port: 443
+        timeout: 5
+        state: started
       register: internet_check
-      failed_when: internet_check.rc == 0
-      changed_when: false
+      failed_when: internet_check is succeeded
 
     - name: confirm air-gap intact
       ansible.builtin.debug:
@@ -80,12 +82,10 @@
 
   tasks:
     - name: check haproxy stats
-      ansible.builtin.command:
-        cmd: >-
-          curl -s http://127.0.0.1:9000/haproxy-stats
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9000/haproxy-stats
+        return_content: false
       register: haproxy_status
-      changed_when: false
-      failed_when: haproxy_status.rc != 0
 
     - name: check haproxy is listening
       ansible.builtin.command:
