@@ -13,7 +13,7 @@
   register: rhel_hardening_fips_enable
   changed_when: rhel_hardening_fips_enable.rc == 0
 
-- name: reboot for fips enablement
+- name: reboot for fips enablement # noqa: no-handler
   ansible.builtin.reboot:
     reboot_timeout: "{{ rhel_hardening_reboot_timeout }}"
     msg: "Rebooting for FIPS mode enablement"

@@ -19,7 +19,7 @@
     state: present
   register: infra_vpc_result
 
-- name: set vpc id fact
+- name: set vpc id fact # noqa: var-naming[no-role-prefix]
   ansible.builtin.set_fact:
     vpc_id: "{{ infra_vpc_result.vpc.id }}"
 
@@ -103,7 +103,7 @@
     fail_msg: "FATAL: Private route table has a default route — air-gap violated"
     success_msg: "Private route table confirmed air-gapped (no default route)"
 
-- name: export networking facts for downstream roles
+- name: export networking facts for downstream roles # noqa: var-naming[no-role-prefix]
   ansible.builtin.set_fact:
     vpc_id: "{{ infra_vpc_result.vpc.id }}"
     igw_id: "{{ infra_vpc_igw_result.gateway_id }}"

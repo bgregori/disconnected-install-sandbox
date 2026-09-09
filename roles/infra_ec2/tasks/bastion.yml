@@ -3,7 +3,7 @@
   amazon.aws.ec2_instance:
     name: "{{ infra_ec2_project_tag }}-bastion"
     instance_type: "{{ bastion_instance_type }}"
-    image_id: "{{ rhel9_ami_id }}"
+    image_id: "{{ infra_ec2_rhel9_ami_id }}"
     key_name: "{{ infra_ec2_key_name }}"
     region: "{{ infra_ec2_region }}"
     vpc_subnet_id: "{{ public_subnet_id }}"
@@ -40,5 +40,5 @@
 
 - name: export bastion facts
   ansible.builtin.set_fact:
-    bastion_instance_id: "{{ infra_ec2_bastion_result.instances[0].instance_id }}"
-    bastion_eip: "{{ infra_ec2_bastion_eip_result.public_ip }}"
+    infra_ec2_bastion_instance_id: "{{ infra_ec2_bastion_result.instances[0].instance_id }}"
+    infra_ec2_bastion_eip: "{{ infra_ec2_bastion_eip_result.public_ip }}"

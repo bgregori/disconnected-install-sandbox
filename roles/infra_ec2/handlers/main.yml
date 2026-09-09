@@ -1,0 +1,8 @@
+---
+- name: save private key to local file
+  ansible.builtin.copy:
+    content: "{{ infra_ec2_key_pair_result.key.private_key }}"
+    dest: "{{ infra_ec2_key_path }}"
+    mode: "0600"
+  delegate_to: localhost
+  become: false

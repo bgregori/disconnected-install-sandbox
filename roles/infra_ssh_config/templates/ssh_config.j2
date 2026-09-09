@@ -1,5 +1,5 @@
 Host bastion-sandbox
-    HostName {{ bastion_eip }}
+    HostName {{ infra_ec2_bastion_eip }}
     User {{ infra_ssh_config_user }}
     IdentityFile {{ infra_ssh_config_key_path }}
     StrictHostKeyChecking accept-new

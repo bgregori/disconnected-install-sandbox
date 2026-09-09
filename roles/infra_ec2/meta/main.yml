@@ -6,7 +6,7 @@ galaxy_info:
   description: Provision EC2 instances, key pair, and Elastic IP for disconnected sandbox
   min_ansible_version: "2.15"
   platforms:
-    - name: GenericCloud
+    - name: EL
       versions:
-        - all
+        - "9"
 dependencies: []

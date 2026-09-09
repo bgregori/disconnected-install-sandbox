@@ -6,7 +6,7 @@ galaxy_info:
   description: Create security groups for bastion, services, registry, and OCP nodes
   min_ansible_version: "2.15"
   platforms:
-    - name: GenericCloud
+    - name: EL
       versions:
-        - all
+        - "9"
 dependencies: []

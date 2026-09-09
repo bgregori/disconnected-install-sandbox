@@ -2,8 +2,8 @@
 - name: validate required facts
   ansible.builtin.assert:
     that:
-      - bastion_eip is defined
-    fail_msg: "bastion_eip must be set (run infra_ec2 first)"
+      - infra_ec2_bastion_eip is defined
+    fail_msg: "infra_ec2_bastion_eip must be set (run infra_ec2 first)"
 
 - name: ensure ssh config.d directory exists
   ansible.builtin.file:
@@ -31,6 +31,6 @@
 - name: display connection info
   ansible.builtin.debug:
     msg:
-      - "Bastion EIP: {{ bastion_eip }}"
+      - "Bastion EIP: {{ infra_ec2_bastion_eip }}"
       - "SSH config written to: {{ infra_ssh_config_file }}"
       - "Test: ssh bastion-sandbox hostname"

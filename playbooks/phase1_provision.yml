@@ -40,7 +40,7 @@
         msg:
           - "=== Phase 1 Complete ==="
           - "VPC: {{ vpc_id }}"
-          - "Bastion EIP: {{ bastion_eip }}"
+          - "Bastion EIP: {{ infra_ec2_bastion_eip }}"
           - "Domain: {{ cluster_domain }}"
           - ""
           - "SSH config: {{ infra_ssh_config_file | default('~/.ssh/config.d/disconnected-sandbox') }}"

@@ -3,7 +3,7 @@
   amazon.aws.ec2_instance:
     name: "{{ infra_ec2_project_tag }}-services"
     instance_type: "{{ services_instance_type }}"
-    image_id: "{{ rhel9_ami_id }}"
+    image_id: "{{ infra_ec2_rhel9_ami_id }}"
     key_name: "{{ infra_ec2_key_name }}"
     region: "{{ infra_ec2_region }}"
     vpc_subnet_id: "{{ private_subnet_id }}"
@@ -30,7 +30,7 @@
   amazon.aws.ec2_instance:
     name: "{{ infra_ec2_project_tag }}-registry"
     instance_type: "{{ registry_instance_type }}"
-    image_id: "{{ rhel9_ami_id }}"
+    image_id: "{{ infra_ec2_rhel9_ami_id }}"
     key_name: "{{ infra_ec2_key_name }}"
     region: "{{ infra_ec2_region }}"
     vpc_subnet_id: "{{ private_subnet_id }}"
@@ -62,7 +62,7 @@
   amazon.aws.ec2_instance:
     name: "{{ infra_ec2_project_tag }}-ocp-node-{{ idx }}"
     instance_type: "{{ ocp_instance_type }}"
-    image_id: "{{ rhel9_ami_id }}"
+    image_id: "{{ infra_ec2_rhel9_ami_id }}"
     key_name: "{{ infra_ec2_key_name }}"
     region: "{{ infra_ec2_region }}"
     vpc_subnet_id: "{{ private_subnet_id }}"

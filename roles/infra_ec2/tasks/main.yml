@@ -24,7 +24,7 @@
 
 - name: select most recent ami
   ansible.builtin.set_fact:
-    rhel9_ami_id: "{{ (infra_ec2_ami_result.images | sort(attribute='creation_date') | last).image_id }}"
+    infra_ec2_rhel9_ami_id: "{{ (infra_ec2_ami_result.images | sort(attribute='creation_date') | last).image_id }}"
 
 - name: create ec2 key pair
   amazon.aws.ec2_key:
@@ -35,15 +35,10 @@
       Project: "{{ infra_ec2_project_tag }}"
       Environment: sandbox
   register: infra_ec2_key_pair_result
+  notify: save private key to local file
 
-- name: save private key to local file
-  ansible.builtin.copy:
-    content: "{{ infra_ec2_key_pair_result.key.private_key }}"
-    dest: "{{ infra_ec2_key_path }}"
-    mode: "0600"
-  when: infra_ec2_key_pair_result.changed
-  delegate_to: localhost
-  become: false
+- name: flush handlers to save key before provisioning instances
+  ansible.builtin.meta: flush_handlers
 
 - name: include bastion provisioning
   ansible.builtin.include_tasks: bastion.yml

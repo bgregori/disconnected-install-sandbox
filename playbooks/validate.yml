@@ -139,7 +139,7 @@
           - "=== Disconnected Sandbox Validation Complete ==="
           - ""
           - "Environment: {{ cluster_domain }}"
-          - "Bastion EIP: {{ bastion_eip | default('see Phase 1 output') }}"
+          - "Bastion EIP: {{ infra_ec2_bastion_eip | default('see Phase 1 output') }}"
           - ""
           - "API endpoint:     https://api.{{ cluster_domain }}:6443"
           - "Console:          https://console-openshift-console.apps.{{ cluster_domain }}"

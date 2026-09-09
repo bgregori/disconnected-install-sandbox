@@ -50,7 +50,7 @@
   failed_when: rhel_hardening_stig_remediation.rc == 1
   changed_when: rhel_hardening_stig_remediation.rc == 2
 
-- name: reboot after stig remediation
+- name: reboot after stig remediation # noqa: no-handler
   ansible.builtin.reboot:
     reboot_timeout: "{{ rhel_hardening_reboot_timeout }}"
     msg: "Rebooting after STIG remediation"
