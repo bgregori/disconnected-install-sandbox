@@ -5,13 +5,14 @@ regions:
 filters:
   tag:Project: disconnected-sandbox
   instance-state-name: running
+hostvars_prefix: aws_
 keyed_groups:
-  - key: tags.sandbox_role
+  - key: aws_tags.sandbox_role
     prefix: role
     separator: "_"
 groups:
-  private_hosts: tags.sandbox_role != 'bastion'
+  private_hosts: aws_tags.sandbox_role != 'bastion'
 hostnames:
   - private-ip-address
 compose:
-  ansible_host: public_ip_address | default(private_ip_address)
+  ansible_host: aws_public_ip_address | default(aws_private_ip_address)
