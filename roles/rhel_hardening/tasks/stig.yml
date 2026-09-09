@@ -1,4 +1,13 @@
 ---
+- name: preserve ansible user passwordless sudo before stig
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/99-ansible-user
+    content: "{{ ansible_user | default('ec2-user') }} ALL=(ALL) NOPASSWD: ALL\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s
+
 - name: install openscap packages
   ansible.builtin.dnf:
     name:
