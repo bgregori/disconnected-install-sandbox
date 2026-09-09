@@ -1,0 +1,3 @@
+---
+ansible_ssh_common_args: >-
+  -o ProxyCommand="ssh -W %h:%p -i {{ ssh_key_path }} ec2-user@{{ hostvars[groups['role_bastion'][0]].ansible_host }}"

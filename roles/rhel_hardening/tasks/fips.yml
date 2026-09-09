@@ -34,7 +34,7 @@
 
 - name: verify fips kernel parameter
   ansible.builtin.command:
-    cmd: cat /proc/sys/crypto/rhel_hardening_fips_enabled
+    cmd: cat /proc/sys/crypto/fips_enabled
   register: rhel_hardening_fips_kernel
   changed_when: false
 
