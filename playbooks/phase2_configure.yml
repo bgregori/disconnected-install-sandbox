@@ -23,7 +23,7 @@
       rhel_hardening_apply_stig: false
 
 - name: enable fips on private hosts
-  hosts: role_services:role_registry:role_ocp_node
+  hosts: role_services:role_registry
   gather_facts: false
   roles:
     - role: rhel_hardening
@@ -45,7 +45,7 @@
 
 # Step 2.4: Configure DNS/NTP clients on all private hosts
 - name: configure dns and ntp clients
-  hosts: role_services:role_registry:role_ocp_node
+  hosts: role_services:role_registry
   gather_facts: false
   roles:
     - role: common_client
@@ -79,15 +79,8 @@
       rhel_hardening_enable_fips: false
 
 - name: apply stig on private hosts
-  hosts: role_services:role_registry:role_ocp_node
+  hosts: role_services:role_registry
   gather_facts: false
   roles:
     - role: rhel_hardening
       rhel_hardening_enable_fips: false
-
-# Step 2.9: Prepare OCP nodes and validate everything
-- name: prepare ocp nodes
-  hosts: role_ocp_node
-  gather_facts: false
-  roles:
-    - role: ocp_node_prep

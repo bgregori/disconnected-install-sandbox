@@ -8,7 +8,6 @@
       - sg_bastion_id is defined
       - sg_services_id is defined
       - sg_registry_id is defined
-      - sg_ocp_nodes_id is defined
     fail_msg: "Run infra_vpc and infra_security_groups before infra_ec2"
 
 - name: find latest rhel 9 ami

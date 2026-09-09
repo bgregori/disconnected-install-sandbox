@@ -43,9 +43,6 @@ registry_instance_type: t3.large
 registry_root_volume_size: 50
 registry_data_volume_size: 200
 registry_port: 8443
-ocp_instance_type: m5.2xlarge
-ocp_root_volume_size: 120
-
 # Bastion local yum repo - serves packages to air-gapped private hosts
 bastion_repo_port: 8080
 

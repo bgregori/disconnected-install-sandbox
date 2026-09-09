@@ -57,34 +57,3 @@
     wait: true
     state: running
   register: infra_ec2_registry_result
-
-- name: launch ocp node instances
-  amazon.aws.ec2_instance:
-    name: "{{ infra_ec2_project_tag }}-ocp-node-{{ idx }}"
-    instance_type: "{{ ocp_instance_type }}"
-    image_id: "{{ infra_ec2_rhel9_ami_id }}"
-    key_name: "{{ infra_ec2_key_name }}"
-    region: "{{ infra_ec2_region }}"
-    vpc_subnet_id: "{{ private_subnet_id }}"
-    security_groups:
-      - "{{ sg_ocp_nodes_id }}"
-    network:
-      assign_public_ip: false
-      private_ip_address: "{{ item }}"
-    volumes:
-      - device_name: /dev/sda1
-        ebs:
-          volume_size: "{{ ocp_root_volume_size }}"
-          volume_type: gp3
-          delete_on_termination: true
-    tags:
-      Project: "{{ infra_ec2_project_tag }}"
-      Environment: sandbox
-      sandbox_role: ocp_node
-      ocp_node_index: "{{ idx }}"
-    wait: true
-    state: running
-  loop: "{{ ocp_node_ips }}"
-  loop_control:
-    index_var: idx
-  register: infra_ec2_ocp_nodes_result

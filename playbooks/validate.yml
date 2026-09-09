@@ -16,7 +16,7 @@
         msg: "FIPS: {{ fips_status.stdout | trim }}"
 
 - name: validate air-gap on private hosts
-  hosts: role_services:role_registry:role_ocp_node
+  hosts: role_services:role_registry
   gather_facts: false
 
   tasks:
@@ -34,7 +34,7 @@
         msg: "Air-gap confirmed — no internet connectivity from {{ inventory_hostname }}"
 
 - name: validate dns service
-  hosts: role_services:role_registry:role_ocp_node
+  hosts: role_services:role_registry
   gather_facts: false
 
   tasks:
@@ -60,7 +60,7 @@
       failed_when: dns_registry.stdout | trim | length == 0
 
 - name: validate ntp service
-  hosts: role_services:role_registry:role_ocp_node
+  hosts: role_services:role_registry
   gather_facts: false
 
   tasks:
