@@ -1,5 +1,5 @@
 ---
-# Required variables — playbooks fail if these are not provided at runtime.
+# Required variables - playbooks fail if these are not provided at runtime.
 # Pass via -e on the command line:
 #   -e aws_region=us-east-2
 #   -e sandbox_domain=sandbox2229.opentlc.com
@@ -14,7 +14,7 @@ vpc_cidr: "10.0.0.0/16"
 public_subnet_cidr: "10.0.1.0/24"
 private_subnet_cidr: "10.0.2.0/24"
 
-# Domain — cluster_domain is derived as {{ cluster_name }}.{{ sandbox_domain }}
+# Domain - cluster_domain is derived as {{ cluster_name }}.{{ sandbox_domain }}
 cluster_name: ocp
 
 # Tagging
@@ -33,7 +33,20 @@ ocp_node_ips:
   - "10.0.2.101"
   - "10.0.2.102"
 
-# Bastion local yum repo — serves packages to air-gapped private hosts
+# Instance types and volumes (in all.yml because Phase 1 runs on localhost
+# which does not load per-group group_vars)
+bastion_instance_type: t3.medium
+bastion_root_volume_size: 50
+services_instance_type: t3.medium
+services_root_volume_size: 50
+registry_instance_type: t3.large
+registry_root_volume_size: 50
+registry_data_volume_size: 200
+registry_port: 8443
+ocp_instance_type: m5.2xlarge
+ocp_root_volume_size: 120
+
+# Bastion local yum repo - serves packages to air-gapped private hosts
 bastion_repo_port: 8080
 
 # Hardening
@@ -41,7 +54,7 @@ rhel_hardening_enable_fips: true
 rhel_hardening_apply_stig: true
 rhel_hardening_stig_profile: xccdf_org.ssgproject.content_profile_stig
 
-# Derived — used throughout roles and templates
+# Derived - used throughout roles and templates
 cluster_domain: "{{ cluster_name }}.{{ sandbox_domain }}"
 
 # Connection defaults for private hosts

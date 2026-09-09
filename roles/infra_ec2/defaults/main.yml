@@ -4,6 +4,6 @@ infra_ec2_project_tag: "{{ project_tag }}"
 infra_ec2_key_name: "{{ ssh_key_name }}"
 infra_ec2_key_path: "{{ ssh_key_path }}"
 
-# AMI lookup filter — RHEL 9, official Red Hat account
+# AMI lookup filter - RHEL 9, official Red Hat account
 infra_ec2_ami_owner: "309956199498"
 infra_ec2_ami_name_filter: "RHEL-9*_HVM-*-x86_64-*-Hourly*"

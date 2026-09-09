@@ -1,4 +1,1 @@
 ---
-ocp_instance_type: m5.2xlarge
-ocp_root_volume_size: 120
-ocp_node_count: 3

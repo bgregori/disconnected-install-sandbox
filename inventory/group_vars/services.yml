@@ -1,5 +1,2 @@
 ---
-services_instance_type: t3.medium
-services_root_volume_size: 50
-
 ntp_allow_subnet: "10.0.2.0/24"

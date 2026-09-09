@@ -6,7 +6,7 @@
       - admin_cidr is defined and admin_cidr | length > 0
     fail_msg: "vpc_id and admin_cidr must be available (run infra_vpc first, pass admin_cidr via -e)"
 
-# sg-bastion has no SG cross-references — create first
+# sg-bastion has no SG cross-references - create first
 - name: create bastion security group
   amazon.aws.ec2_security_group:
     name: "{{ infra_security_groups_project_tag }}-bastion"
@@ -21,15 +21,15 @@
       - proto: tcp
         ports: 443
         cidr_ip: "0.0.0.0/0"
-        rule_desc: "HAProxy — OCP apps ingress"
+        rule_desc: "HAProxy - OCP apps ingress"
       - proto: tcp
         ports: 6443
         cidr_ip: "0.0.0.0/0"
-        rule_desc: "HAProxy — OCP Kubernetes API"
+        rule_desc: "HAProxy - OCP Kubernetes API"
       - proto: tcp
         ports: 80
         cidr_ip: "0.0.0.0/0"
-        rule_desc: "HAProxy — OCP HTTP redirect"
+        rule_desc: "HAProxy - OCP HTTP redirect"
       - proto: tcp
         ports: "{{ infra_security_groups_bastion_repo_port }}"
         cidr_ip: "{{ infra_security_groups_private_subnet_cidr }}"
@@ -42,15 +42,15 @@
       - proto: tcp
         ports: 443
         cidr_ip: "0.0.0.0/0"
-        rule_desc: "HTTPS — download content/packages"
+        rule_desc: "HTTPS - download content/packages"
       - proto: tcp
         ports: 80
         cidr_ip: "0.0.0.0/0"
-        rule_desc: "HTTP — download content/packages"
+        rule_desc: "HTTP - download content/packages"
       - proto: tcp
         ports: 6443
         cidr_ip: "{{ infra_security_groups_private_subnet_cidr }}"
-        rule_desc: "HAProxy backend — OCP API"
+        rule_desc: "HAProxy backend - OCP API"
       - proto: tcp
         ports: 53
         cidr_ip: "{{ infra_security_groups_services_ip }}/32"
@@ -62,7 +62,7 @@
       - proto: tcp
         ports: 8443
         cidr_ip: "{{ infra_security_groups_registry_ip }}/32"
-        rule_desc: "Registry HTTPS — oc mirror content push"
+        rule_desc: "Registry HTTPS - oc mirror content push"
     tags:
       Name: "{{ infra_security_groups_project_tag }}-bastion"
       Project: "{{ infra_security_groups_project_tag }}"
@@ -96,7 +96,7 @@
     rules_egress:
       - proto: all
         cidr_ip: "{{ infra_security_groups_vpc_cidr }}"
-        rule_desc: "VPC-internal only — no internet"
+        rule_desc: "VPC-internal only - no internet"
     tags:
       Name: "{{ infra_security_groups_project_tag }}-services"
       Project: "{{ infra_security_groups_project_tag }}"
@@ -126,7 +126,7 @@
       - proto: tcp
         ports: 8443
         group_id: "{{ infra_security_groups_bastion_result.group_id }}"
-        rule_desc: "Registry HTTPS from bastion — oc mirror content push"
+        rule_desc: "Registry HTTPS from bastion - oc mirror content push"
     rules_egress:
       - proto: tcp
         ports: 53
@@ -151,7 +151,7 @@
     state: present
   register: infra_security_groups_registry_result
 
-# OCP nodes SG — created in two passes to handle self-reference
+# OCP nodes SG - created in two passes to handle self-reference
 - name: create ocp nodes security group shell
   amazon.aws.ec2_security_group:
     name: "{{ infra_security_groups_project_tag }}-ocp-nodes"
@@ -316,8 +316,8 @@
         | map(attribute='ip_ranges') | flatten
         | selectattr('cidr_ip', 'equalto', '0.0.0.0/0')
         | list | length == 0
-    fail_msg: "FATAL: OCP nodes SG has 0.0.0.0/0 egress — air-gap violated"
-    success_msg: "OCP nodes SG confirmed — no internet egress"
+    fail_msg: "FATAL: OCP nodes SG has 0.0.0.0/0 egress - air-gap violated"
+    success_msg: "OCP nodes SG confirmed - no internet egress"
 
 - name: export security group facts for downstream roles # noqa: var-naming[no-role-prefix]
   ansible.builtin.set_fact:
