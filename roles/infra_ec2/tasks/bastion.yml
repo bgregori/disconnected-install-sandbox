@@ -24,11 +24,11 @@
       sandbox_role: bastion
     wait: true
     state: running
-  register: bastion_result
+  register: infra_ec2_bastion_result
 
 - name: allocate elastic ip for bastion
   amazon.aws.ec2_eip:
-    instance_id: "{{ bastion_result.instances[0].instance_id }}"
+    device_id: "{{ infra_ec2_bastion_result.instances[0].instance_id }}"
     region: "{{ infra_ec2_region }}"
     in_vpc: true
     tags:
@@ -36,9 +36,9 @@
       Project: "{{ infra_ec2_project_tag }}"
       Environment: sandbox
     state: present
-  register: bastion_eip_result
+  register: infra_ec2_bastion_eip_result
 
 - name: export bastion facts
   ansible.builtin.set_fact:
-    bastion_instance_id: "{{ bastion_result.instances[0].instance_id }}"
-    bastion_eip: "{{ bastion_eip_result.public_ip }}"
+    bastion_instance_id: "{{ infra_ec2_bastion_result.instances[0].instance_id }}"
+    bastion_eip: "{{ infra_ec2_bastion_eip_result.public_ip }}"

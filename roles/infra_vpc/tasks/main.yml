@@ -17,11 +17,11 @@
       Project: "{{ infra_vpc_project_tag }}"
       Environment: sandbox
     state: present
-  register: vpc_result
+  register: infra_vpc_result
 
 - name: set vpc id fact
   ansible.builtin.set_fact:
-    vpc_id: "{{ vpc_result.vpc.id }}"
+    vpc_id: "{{ infra_vpc_result.vpc.id }}"
 
 - name: create internet gateway
   amazon.aws.ec2_vpc_igw:
@@ -32,7 +32,7 @@
       Project: "{{ infra_vpc_project_tag }}"
       Environment: sandbox
     state: present
-  register: igw_result
+  register: infra_vpc_igw_result
 
 - name: create public subnet
   amazon.aws.ec2_vpc_subnet:
@@ -46,7 +46,7 @@
       Project: "{{ infra_vpc_project_tag }}"
       Environment: sandbox
     state: present
-  register: public_subnet_result
+  register: infra_vpc_public_subnet_result
 
 - name: create private subnet
   amazon.aws.ec2_vpc_subnet:
@@ -60,17 +60,17 @@
       Project: "{{ infra_vpc_project_tag }}"
       Environment: sandbox
     state: present
-  register: private_subnet_result
+  register: infra_vpc_private_subnet_result
 
 - name: create public route table
   amazon.aws.ec2_vpc_route_table:
     vpc_id: "{{ vpc_id }}"
     region: "{{ infra_vpc_region }}"
     subnets:
-      - "{{ public_subnet_result.subnet.id }}"
+      - "{{ infra_vpc_public_subnet_result.subnet.id }}"
     routes:
       - dest: "0.0.0.0/0"
-        gateway_id: "{{ igw_result.gateway_id }}"
+        gateway_id: "{{ infra_vpc_igw_result.gateway_id }}"
     tags:
       Name: "{{ infra_vpc_project_tag }}-public-rt"
       Project: "{{ infra_vpc_project_tag }}"
@@ -82,7 +82,7 @@
     vpc_id: "{{ vpc_id }}"
     region: "{{ infra_vpc_region }}"
     subnets:
-      - "{{ private_subnet_result.subnet.id }}"
+      - "{{ infra_vpc_private_subnet_result.subnet.id }}"
     routes: []
     purge_routes: true
     tags:
@@ -90,13 +90,13 @@
       Project: "{{ infra_vpc_project_tag }}"
       Environment: sandbox
     state: present
-  register: private_rt_result
+  register: infra_vpc_private_rt_result
 
 - name: validate air-gap — private route table has no default route
   ansible.builtin.assert:
     that:
       - >-
-        private_rt_result.route_table.routes
+        infra_vpc_private_rt_result.route_table.routes
         | selectattr('destination_cidr_block', 'defined')
         | selectattr('destination_cidr_block', 'equalto', '0.0.0.0/0')
         | list | length == 0
@@ -105,7 +105,7 @@
 
 - name: export networking facts for downstream roles
   ansible.builtin.set_fact:
-    vpc_id: "{{ vpc_result.vpc.id }}"
-    igw_id: "{{ igw_result.gateway_id }}"
-    public_subnet_id: "{{ public_subnet_result.subnet.id }}"
-    private_subnet_id: "{{ private_subnet_result.subnet.id }}"
+    vpc_id: "{{ infra_vpc_result.vpc.id }}"
+    igw_id: "{{ infra_vpc_igw_result.gateway_id }}"
+    public_subnet_id: "{{ infra_vpc_public_subnet_result.subnet.id }}"
+    private_subnet_id: "{{ infra_vpc_private_subnet_result.subnet.id }}"

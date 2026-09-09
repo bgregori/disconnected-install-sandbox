@@ -1,5 +1,7 @@
 ---
 galaxy_info:
+  author: bgregori
+  license: GPL-3.0-or-later
   role_name: bind_dns
   description: Configure BIND9 authoritative DNS for disconnected OpenShift sandbox
   min_ansible_version: "2.15"

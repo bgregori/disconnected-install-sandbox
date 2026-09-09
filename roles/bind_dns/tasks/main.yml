@@ -59,13 +59,13 @@
 - name: validate forward dns resolution
   ansible.builtin.command:
     cmd: "dig @{{ bind_dns_listen_ip }} api.{{ bind_dns_zone }} +short"
-  register: dns_validate
+  register: bind_dns_validate
   changed_when: false
-  failed_when: dns_validate.stdout | trim | length == 0
+  failed_when: bind_dns_validate.stdout | trim | length == 0
 
 - name: validate wildcard dns resolution
   ansible.builtin.command:
     cmd: "dig @{{ bind_dns_listen_ip }} test.apps.{{ bind_dns_zone }} +short"
-  register: dns_wildcard_validate
+  register: bind_dns_wildcard_validate
   changed_when: false
-  failed_when: dns_wildcard_validate.stdout | trim | length == 0
+  failed_when: bind_dns_wildcard_validate.stdout | trim | length == 0

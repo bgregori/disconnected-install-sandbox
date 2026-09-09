@@ -68,7 +68,7 @@
       Project: "{{ infra_sg_project_tag }}"
       Environment: sandbox
     state: present
-  register: sg_bastion_result
+  register: infra_sg_bastion_result
 
 - name: create services security group
   amazon.aws.ec2_security_group:
@@ -79,7 +79,7 @@
     rules:
       - proto: tcp
         ports: 22
-        group_id: "{{ sg_bastion_result.group_id }}"
+        group_id: "{{ infra_sg_bastion_result.group_id }}"
         rule_desc: "SSH from bastion"
       - proto: tcp
         ports: 53
@@ -102,7 +102,7 @@
       Project: "{{ infra_sg_project_tag }}"
       Environment: sandbox
     state: present
-  register: sg_services_result
+  register: infra_sg_services_result
 
 - name: create registry security group
   amazon.aws.ec2_security_group:
@@ -113,7 +113,7 @@
     rules:
       - proto: tcp
         ports: 22
-        group_id: "{{ sg_bastion_result.group_id }}"
+        group_id: "{{ infra_sg_bastion_result.group_id }}"
         rule_desc: "SSH from bastion"
       - proto: tcp
         ports: 5000
@@ -125,7 +125,7 @@
         rule_desc: "Registry HTTPS from private subnet"
       - proto: tcp
         ports: 8443
-        group_id: "{{ sg_bastion_result.group_id }}"
+        group_id: "{{ infra_sg_bastion_result.group_id }}"
         rule_desc: "Registry HTTPS from bastion — oc mirror content push"
     rules_egress:
       - proto: tcp
@@ -149,7 +149,7 @@
       Project: "{{ infra_sg_project_tag }}"
       Environment: sandbox
     state: present
-  register: sg_registry_result
+  register: infra_sg_registry_result
 
 # OCP nodes SG — created in two passes to handle self-reference
 - name: create ocp nodes security group shell
@@ -167,7 +167,7 @@
       Project: "{{ infra_sg_project_tag }}"
       Environment: sandbox
     state: present
-  register: sg_ocp_nodes_shell
+  register: infra_sg_ocp_nodes_shell
 
 - name: apply ocp nodes security group rules
   amazon.aws.ec2_security_group:
@@ -179,7 +179,7 @@
       # SSH from bastion
       - proto: tcp
         ports: 22
-        group_id: "{{ sg_bastion_result.group_id }}"
+        group_id: "{{ infra_sg_bastion_result.group_id }}"
         rule_desc: "SSH from bastion"
       # External-facing (from VPC)
       - proto: tcp
@@ -201,39 +201,39 @@
       # Inter-node (self-referencing)
       - proto: tcp
         ports: 2379-2380
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "etcd server + peer"
       - proto: tcp
         ports: 9000-9999
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "Host-level services"
       - proto: tcp
         ports: 10250
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "Kubelet API"
       - proto: tcp
         ports: 10257
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "kube-controller-manager"
       - proto: tcp
         ports: 10259
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "kube-scheduler"
       - proto: udp
         ports: 4789
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "VXLAN OVN-Kubernetes"
       - proto: udp
         ports: 6081
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "Geneve OVN-Kubernetes"
       - proto: udp
         ports: 500
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "IPsec IKE"
       - proto: udp
         ports: 4500
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "IPsec NAT-T"
       - proto: tcp
         ports: 30000-32767
@@ -274,44 +274,44 @@
       # Inter-node (self-referencing)
       - proto: tcp
         ports: 2379-2380
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "etcd"
       - proto: tcp
         ports: 6443
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "Kubernetes API"
       - proto: tcp
         ports: 10250
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "Kubelet"
       - proto: udp
         ports: 4789
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "VXLAN"
       - proto: udp
         ports: 6081
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "Geneve"
       - proto: tcp
         ports: 9000-9999
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "Host services"
       - proto: tcp
         ports: 22623
-        group_id: "{{ sg_ocp_nodes_shell.group_id }}"
+        group_id: "{{ infra_sg_ocp_nodes_shell.group_id }}"
         rule_desc: "Machine Config Server"
     tags:
       Name: "{{ infra_sg_project_tag }}-ocp-nodes"
       Project: "{{ infra_sg_project_tag }}"
       Environment: sandbox
     state: present
-  register: sg_ocp_nodes_result
+  register: infra_sg_ocp_nodes_result
 
 - name: validate ocp nodes egress has no internet route
   ansible.builtin.assert:
     that:
       - >-
-        sg_ocp_nodes_result.ip_permissions_egress
+        infra_sg_ocp_nodes_result.ip_permissions_egress
         | selectattr('ip_ranges', 'defined')
         | map(attribute='ip_ranges') | flatten
         | selectattr('cidr_ip', 'equalto', '0.0.0.0/0')
@@ -321,7 +321,7 @@
 
 - name: export security group facts for downstream roles
   ansible.builtin.set_fact:
-    sg_bastion_id: "{{ sg_bastion_result.group_id }}"
-    sg_services_id: "{{ sg_services_result.group_id }}"
-    sg_registry_id: "{{ sg_registry_result.group_id }}"
-    sg_ocp_nodes_id: "{{ sg_ocp_nodes_result.group_id }}"
+    sg_bastion_id: "{{ infra_sg_bastion_result.group_id }}"
+    sg_services_id: "{{ infra_sg_services_result.group_id }}"
+    sg_registry_id: "{{ infra_sg_registry_result.group_id }}"
+    sg_ocp_nodes_id: "{{ infra_sg_ocp_nodes_result.group_id }}"

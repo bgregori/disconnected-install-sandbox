@@ -23,8 +23,8 @@
       --alldeps
       --destdir={{ bastion_repo_base_dir }}/{{ bastion_repo_name }}
       {{ bastion_repo_packages | join(' ') }}
-  register: dnf_download
-  changed_when: "'No package downloaded' not in dnf_download.stdout"
+  register: bastion_repo_dnf_download
+  changed_when: "'No package downloaded' not in bastion_repo_dnf_download.stdout"
 
 - name: create repo metadata
   ansible.builtin.command:
@@ -43,9 +43,9 @@
 - name: configure selinux for custom httpd port
   ansible.builtin.command:
     cmd: "semanage port -a -t http_port_t -p tcp {{ bastion_repo_port }}"
-  register: semanage_result
-  changed_when: semanage_result.rc == 0
-  failed_when: semanage_result.rc != 0 and 'already defined' not in semanage_result.stderr
+  register: bastion_repo_semanage_result
+  changed_when: bastion_repo_semanage_result.rc == 0
+  failed_when: bastion_repo_semanage_result.rc != 0 and 'already defined' not in bastion_repo_semanage_result.stderr
 
 - name: enable and start httpd
   ansible.builtin.systemd:

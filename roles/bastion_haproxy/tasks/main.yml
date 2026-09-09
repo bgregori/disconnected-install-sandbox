@@ -17,8 +17,8 @@
 - name: allow haproxy to bind to any port
   ansible.builtin.command:
     cmd: setsebool -P haproxy_connect_any 1
-  register: sebool_result
-  changed_when: sebool_result.rc == 0
+  register: bastion_haproxy_sebool_result
+  changed_when: bastion_haproxy_sebool_result.rc == 0
   failed_when: false
 
 - name: enable and start haproxy

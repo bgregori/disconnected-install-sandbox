@@ -24,7 +24,7 @@
       sandbox_role: services
     wait: true
     state: running
-  register: services_result
+  register: infra_ec2_services_result
 
 - name: launch registry instance
   amazon.aws.ec2_instance:
@@ -56,7 +56,7 @@
       sandbox_role: registry
     wait: true
     state: running
-  register: registry_result
+  register: infra_ec2_registry_result
 
 - name: launch ocp node instances
   amazon.aws.ec2_instance:
@@ -87,4 +87,4 @@
   loop: "{{ ocp_node_ips }}"
   loop_control:
     index_var: idx
-  register: ocp_nodes_result
+  register: infra_ec2_ocp_nodes_result

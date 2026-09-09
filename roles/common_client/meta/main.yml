@@ -1,6 +1,7 @@
 ---
 galaxy_info:
   author: bgregori
+  license: GPL-3.0-or-later
   role_name: common_client
   description: Configure DNS resolver and NTP client for private subnet hosts
   min_ansible_version: "2.15"

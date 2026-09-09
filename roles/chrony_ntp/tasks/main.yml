@@ -30,6 +30,6 @@
 - name: validate chrony is serving time
   ansible.builtin.command:
     cmd: chronyc tracking
-  register: chrony_validate
+  register: chrony_ntp_validate
   changed_when: false
-  failed_when: "'Reference ID' not in chrony_validate.stdout"
+  failed_when: "'Reference ID' not in chrony_ntp_validate.stdout"

@@ -35,11 +35,11 @@
     cmd: >-
       dig +short
       api.{{ infra_route53_cluster_name }}.{{ infra_route53_zone }}
-  register: api_dns_check
+  register: infra_route53_api_dns_check
   changed_when: false
   retries: 6
   delay: 10
-  until: infra_route53_bastion_eip in api_dns_check.stdout
+  until: infra_route53_bastion_eip in infra_route53_api_dns_check.stdout
 
 - name: display route53 records
   ansible.builtin.debug:

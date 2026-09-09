@@ -26,12 +26,12 @@
 - name: check if stig datastream exists
   ansible.builtin.stat:
     path: "{{ rhel_hardening_stig_datastream }}"
-  register: stig_ds
+  register: rhel_hardening_stig_ds
 
 - name: assert stig datastream is available
   ansible.builtin.assert:
     that:
-      - stig_ds.stat.exists
+      - rhel_hardening_stig_ds.stat.exists
     fail_msg: >-
       STIG datastream not found at {{ rhel_hardening_stig_datastream }}.
       Ensure scap-security-guide is installed.
@@ -45,16 +45,16 @@
       --results {{ rhel_hardening_stig_results_dir }}/stig-remediation.xml
       --report {{ rhel_hardening_stig_results_dir }}/stig-remediation.html
       {{ rhel_hardening_stig_datastream }}
-  register: stig_remediation
+  register: rhel_hardening_stig_remediation
   # oscap exit codes: 0=pass, 1=error, 2=some-fail (normal for STIG)
-  failed_when: stig_remediation.rc == 1
-  changed_when: stig_remediation.rc == 2
+  failed_when: rhel_hardening_stig_remediation.rc == 1
+  changed_when: rhel_hardening_stig_remediation.rc == 2
 
 - name: reboot after stig remediation
   ansible.builtin.reboot:
     reboot_timeout: "{{ rhel_hardening_reboot_timeout }}"
     msg: "Rebooting after STIG remediation"
-  when: stig_remediation is changed
+  when: rhel_hardening_stig_remediation is changed
 
 - name: generate post-remediation compliance report
   ansible.builtin.command:
@@ -64,12 +64,12 @@
       --results {{ rhel_hardening_stig_results_dir }}/stig-compliance.xml
       --report {{ rhel_hardening_stig_results_dir }}/stig-compliance.html
       {{ rhel_hardening_stig_datastream }}
-  register: stig_compliance
-  failed_when: stig_compliance.rc == 1
+  register: rhel_hardening_stig_compliance
+  failed_when: rhel_hardening_stig_compliance.rc == 1
   changed_when: false
 
 - name: display stig compliance summary
   ansible.builtin.debug:
     msg:
       - "STIG compliance report: {{ rhel_hardening_stig_results_dir }}/stig-compliance.html"
-      - "oscap exit code: {{ stig_compliance.rc }} (0=all pass, 2=some findings remain)"
+      - "oscap exit code: {{ rhel_hardening_stig_compliance.rc }} (0=all pass, 2=some findings remain)"

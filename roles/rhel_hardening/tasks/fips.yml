@@ -2,44 +2,44 @@
 - name: check current fips status
   ansible.builtin.command:
     cmd: fips-mode-setup --check
-  register: fips_check
+  register: rhel_hardening_fips_check
   changed_when: false
   failed_when: false
 
 - name: enable fips mode
   ansible.builtin.command:
     cmd: fips-mode-setup --enable
-  when: "'FIPS mode is enabled' not in fips_check.stdout"
-  register: fips_enable
-  changed_when: fips_enable.rc == 0
+  when: "'FIPS mode is enabled' not in rhel_hardening_fips_check.stdout"
+  register: rhel_hardening_fips_enable
+  changed_when: rhel_hardening_fips_enable.rc == 0
 
 - name: reboot for fips enablement
   ansible.builtin.reboot:
     reboot_timeout: "{{ rhel_hardening_reboot_timeout }}"
     msg: "Rebooting for FIPS mode enablement"
-  when: fips_enable is changed
+  when: rhel_hardening_fips_enable is changed
 
 - name: verify fips mode is active
   ansible.builtin.command:
     cmd: fips-mode-setup --check
-  register: fips_verify
+  register: rhel_hardening_fips_verify
   changed_when: false
 
 - name: assert fips is enabled
   ansible.builtin.assert:
     that:
-      - "'FIPS mode is enabled' in fips_verify.stdout"
+      - "'FIPS mode is enabled' in rhel_hardening_fips_verify.stdout"
     fail_msg: "FIPS mode failed to enable after reboot"
     success_msg: "FIPS mode is active"
 
 - name: verify fips kernel parameter
   ansible.builtin.command:
-    cmd: cat /proc/sys/crypto/fips_enabled
-  register: fips_kernel
+    cmd: cat /proc/sys/crypto/rhel_hardening_fips_enabled
+  register: rhel_hardening_fips_kernel
   changed_when: false
 
 - name: assert kernel fips flag
   ansible.builtin.assert:
     that:
-      - fips_kernel.stdout | trim == "1"
+      - rhel_hardening_fips_kernel.stdout | trim == "1"
     fail_msg: "Kernel FIPS flag is not set"

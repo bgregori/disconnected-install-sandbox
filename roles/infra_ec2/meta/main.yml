@@ -1,6 +1,7 @@
 ---
 galaxy_info:
   author: bgregori
+  license: GPL-3.0-or-later
   role_name: infra_ec2
   description: Provision EC2 instances, key pair, and Elastic IP for disconnected sandbox
   min_ansible_version: "2.15"
