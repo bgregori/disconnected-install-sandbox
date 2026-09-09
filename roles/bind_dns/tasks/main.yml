@@ -1,12 +1,4 @@
 ---
-- name: configure bastion local repo
-  ansible.builtin.yum_repository:
-    name: bastion-local
-    description: Bastion Local Repository
-    baseurl: "{{ bind_dns_bastion_repo_url }}"
-    enabled: true
-    gpgcheck: false
-
 - name: install bind packages
   ansible.builtin.dnf:
     name:

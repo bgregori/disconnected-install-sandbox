@@ -1,13 +1,4 @@
 ---
-- name: configure bastion local repo for air-gapped hosts
-  ansible.builtin.yum_repository:
-    name: bastion-local
-    description: Bastion Local Repository
-    baseurl: "{{ rhel_hardening_bastion_repo_url }}"
-    enabled: true
-    gpgcheck: false
-  when: "'role_bastion' not in group_names"
-
 - name: install openscap packages
   ansible.builtin.dnf:
     name:

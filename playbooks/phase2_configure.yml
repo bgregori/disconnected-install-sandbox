@@ -12,6 +12,26 @@
   roles:
     - role: bastion_repo
 
+# Step 2.0.1: Disable RHUI repos and enable bastion local repo on private hosts
+- name: configure air-gapped repos on private hosts
+  hosts: role_services:role_registry
+  gather_facts: false
+  tasks:
+    - name: disable rhui repos
+      ansible.builtin.command:
+        cmd: dnf config-manager --disable '*rhui*'
+      register: phase2_disable_rhui
+      changed_when: "'Nothing to do' not in phase2_disable_rhui.stderr"
+      failed_when: false
+
+    - name: configure bastion local repo
+      ansible.builtin.yum_repository:
+        name: bastion-local
+        description: Bastion Local Repository
+        baseurl: "http://{{ bastion_private_ip }}:{{ bastion_repo_port }}/rhel9-local"
+        enabled: true
+        gpgcheck: false
+
 # Step 2.1: Enable FIPS on all hosts (requires reboot)
 - name: enable fips on bastion
   hosts: role_bastion
