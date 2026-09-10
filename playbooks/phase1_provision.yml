@@ -33,6 +33,7 @@
     - role: infra_security_groups
     - role: infra_ec2
     - role: infra_ssh_config
+    - role: infra_route53
 
   post_tasks:
     - name: phase 1 summary
