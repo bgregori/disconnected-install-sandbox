@@ -896,11 +896,12 @@ Two DNS views serve the same names with different targets:
 | `*.apps.ocp.{{ sandbox_domain }}`       | → Bastion EIP        | → 10.0.2.104 (Ingress VIP)|
 | `registry.ocp.{{ sandbox_domain }}`     | (not published)      | → 10.0.2.20               |
 
-External clients (browser, `oc` CLI) resolve via Route53 → bastion EIP → HAProxy → OCP nodes
-(round-robin across all 3 nodes). Internal clients (OCP nodes, pods) resolve via BIND9 →
-keepalived VIPs, which float between nodes for HA failover. The VIPs are separate IPs not
-assigned to any specific node — OpenShift's keepalived manages them across the control plane.
-Both VIPs are registered as secondary IPs on the KVM host ENI so AWS routes the traffic.
+Both external and internal traffic converge on the same VIPs. External clients (browser,
+`oc` CLI) resolve via Route53 → bastion EIP → HAProxy → VIPs. Internal clients (OCP nodes,
+pods) resolve via BIND9 → VIPs directly. OpenShift's keepalived manages the VIPs across
+control plane nodes for HA failover — if the active node goes down, the VIP moves to
+another node automatically. Both VIPs are registered as secondary IPs on the KVM host ENI
+so AWS routes the traffic correctly through macvtap to the VM holding the VIP.
 
 ### 7.3 Why HAProxy in TCP Mode
 
