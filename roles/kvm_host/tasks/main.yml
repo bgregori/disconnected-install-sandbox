@@ -1,0 +1,123 @@
+---
+- name: install kvm packages
+  ansible.builtin.dnf:
+    name:
+      - qemu-kvm
+      - libvirt
+      - libvirt-client
+      - virt-install
+      - python3-libvirt
+    state: present
+
+- name: create filesystem on data volume
+  community.general.filesystem:
+    fstype: xfs
+    dev: "{{ kvm_host_data_device }}"
+
+- name: mount data volume
+  ansible.posix.mount:
+    path: "{{ kvm_host_data_mount }}"
+    src: "{{ kvm_host_data_device }}"
+    fstype: xfs
+    state: mounted
+
+- name: mask modular libvirt daemons that conflict with libvirtd
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    masked: true
+  loop:
+    - virtqemud.service
+    - virtnetworkd.service
+    - virtinterfaced.service
+    - virtstoraged.service
+    - virtsecretd.service
+    - virtnwfilterd.service
+    - virtnodedevd.service
+    - virtproxyd.service
+
+- name: disable libvirtd auto-exit timeout
+  ansible.builtin.lineinfile:
+    path: /etc/sysconfig/libvirtd
+    regexp: '^LIBVIRTD_ARGS='
+    line: 'LIBVIRTD_ARGS=""'
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart libvirtd
+
+- name: enable and start libvirtd
+  ansible.builtin.systemd:
+    name: libvirtd
+    enabled: true
+    state: started
+
+- name: destroy default libvirt network
+  ansible.builtin.command:
+    cmd: virsh net-destroy default
+  register: kvm_host_net_destroy
+  changed_when: kvm_host_net_destroy.rc == 0
+  failed_when: false
+
+- name: undefine default libvirt network
+  ansible.builtin.command:
+    cmd: virsh net-undefine default
+  register: kvm_host_net_undefine
+  changed_when: kvm_host_net_undefine.rc == 0
+  failed_when: false
+
+- name: create qcow2 disk images
+  ansible.builtin.command:
+    cmd: >-
+      qemu-img create -f qcow2
+      {{ kvm_host_data_mount }}/ocp-node-{{ idx }}.qcow2
+      {{ kvm_host_vm_disk_gb }}G
+    creates: "{{ kvm_host_data_mount }}/ocp-node-{{ idx }}.qcow2"
+  loop: "{{ range(kvm_host_ocp_node_ips | length) | list }}"
+  loop_control:
+    loop_var: idx
+
+- name: check existing vm domains
+  ansible.builtin.command:
+    cmd: "virsh dominfo ocp-node-{{ idx }}"
+  register: kvm_host_domain_check
+  changed_when: false
+  failed_when: false
+  loop: "{{ range(kvm_host_ocp_node_ips | length) | list }}"
+  loop_control:
+    loop_var: idx
+
+- name: render vm domain xml
+  ansible.builtin.template:
+    src: vm-domain.xml.j2
+    dest: "/etc/libvirt/qemu/ocp-node-{{ idx }}.xml"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ range(kvm_host_ocp_node_ips | length) | list }}"
+  loop_control:
+    loop_var: idx
+  vars:
+    vm_index: "{{ idx }}"
+    vm_ip: "{{ kvm_host_ocp_node_ips[idx] }}"
+  when: kvm_host_domain_check.results[idx].rc != 0
+
+- name: define vm domains
+  ansible.builtin.command:
+    cmd: "virsh define /etc/libvirt/qemu/ocp-node-{{ idx }}.xml"
+  register: kvm_host_define_result
+  changed_when: kvm_host_define_result.rc == 0
+  loop: "{{ range(kvm_host_ocp_node_ips | length) | list }}"
+  loop_control:
+    loop_var: idx
+  when: kvm_host_domain_check.results[idx].rc != 0
+
+- name: verify vm domains are defined
+  ansible.builtin.command:
+    cmd: virsh list --all
+  register: kvm_host_verify
+  changed_when: false
+
+- name: display vm domain status
+  ansible.builtin.debug:
+    msg: "{{ kvm_host_verify.stdout_lines }}"

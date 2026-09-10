@@ -1,0 +1,65 @@
+---
+- name: install python3-pip
+  ansible.builtin.dnf:
+    name: python3-pip
+    state: present
+
+- name: install sushy-tools from bastion pip wheels
+  ansible.builtin.pip:
+    name: sushy-tools
+    extra_args: "--no-index --find-links {{ redfish_bmc_pip_wheel_url }} --trusted-host {{ bastion_private_ip }}"
+  register: redfish_bmc_install_result
+
+- name: create sushy config directory
+  ansible.builtin.file:
+    path: /etc/sushy
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: deploy sushy-emulator configuration
+  ansible.builtin.template:
+    src: sushy-emulator.conf.j2
+    dest: /etc/sushy/sushy-emulator.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart sushy-emulator
+
+- name: deploy sushy-emulator systemd unit
+  ansible.builtin.template:
+    src: sushy-emulator.service.j2
+    dest: /etc/systemd/system/sushy-emulator.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart sushy-emulator
+
+- name: reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: enable and start sushy-emulator
+  ansible.builtin.systemd:
+    name: sushy-emulator
+    enabled: true
+    state: started
+
+- name: wait for redfish api to be available
+  ansible.builtin.uri:
+    url: "http://{{ redfish_bmc_listen_ip }}:{{ redfish_bmc_port }}/redfish/v1/"
+    method: GET
+    status_code: 200
+  register: redfish_bmc_health_check
+  retries: 6
+  delay: 10
+  until: redfish_bmc_health_check.status == 200
+
+- name: verify redfish systems are listed
+  ansible.builtin.uri:
+    url: "http://{{ redfish_bmc_listen_ip }}:{{ redfish_bmc_port }}/redfish/v1/Systems/"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: redfish_bmc_systems_result

@@ -22,14 +22,44 @@
       --resolve
       --alldeps
       --destdir={{ bastion_repo_base_dir }}/{{ bastion_repo_name }}
-      {{ bastion_repo_packages | join(' ') }}
+      {{ (bastion_repo_packages + (bastion_repo_kvm_packages if bastion_repo_enable_kvm | bool else [])) | join(' ') }}
   register: bastion_repo_dnf_download
   changed_when: "'No package downloaded' not in bastion_repo_dnf_download.stdout"
+
+- name: install python3-pip on bastion
+  ansible.builtin.dnf:
+    name: python3-pip
+    state: present
+  when: bastion_repo_enable_kvm | bool
+
+- name: create pip wheel directory
+  ansible.builtin.file:
+    path: "{{ bastion_repo_pip_wheel_dir }}"
+    state: directory
+    owner: apache
+    group: apache
+    mode: "0755"
+  when: bastion_repo_enable_kvm | bool
+
+- name: download sushy-tools pip wheels
+  ansible.builtin.command:
+    cmd: "pip3 download sushy-tools -d {{ bastion_repo_pip_wheel_dir }}"
+  register: bastion_repo_pip_download
+  changed_when: "'Saved' in bastion_repo_pip_download.stdout"
+  when: bastion_repo_enable_kvm | bool
 
 - name: create repo metadata
   ansible.builtin.command:
     cmd: "createrepo {{ bastion_repo_base_dir }}/{{ bastion_repo_name }}"
   changed_when: true
+
+- name: fix repo directory ownership and permissions
+  ansible.builtin.file:
+    path: "{{ bastion_repo_base_dir }}"
+    owner: apache
+    group: apache
+    mode: "0755"
+    recurse: true
 
 - name: restore selinux contexts on repo directory
   ansible.builtin.command:

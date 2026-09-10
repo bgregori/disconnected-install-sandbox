@@ -14,7 +14,7 @@
 
 # Step 2.0.1: Disable RHUI repos and enable bastion local repo on private hosts
 - name: configure air-gapped repos on private hosts
-  hosts: role_services:role_registry
+  hosts: role_services:role_registry:role_kvm
   gather_facts: false
   tasks:
     - name: disable rhui repos
@@ -43,7 +43,7 @@
       rhel_hardening_apply_stig: false
 
 - name: enable fips on private hosts
-  hosts: role_services:role_registry
+  hosts: role_services:role_registry:role_kvm
   gather_facts: false
   roles:
     - role: rhel_hardening
@@ -65,7 +65,7 @@
 
 # Step 2.4: Configure DNS/NTP clients on all private hosts
 - name: configure dns and ntp clients
-  hosts: role_services:role_registry
+  hosts: role_services:role_registry:role_kvm
   gather_facts: false
   roles:
     - role: common_client
@@ -79,9 +79,23 @@
   roles:
     - role: bastion_haproxy
 
-# Step 2.6: Apply STIG - private hosts first while bastion repo is still serving
+# Step 2.6: Configure KVM host with libvirt and OCP VMs
+- name: configure kvm host
+  hosts: role_kvm
+  gather_facts: true
+  roles:
+    - role: kvm_host
+
+# Step 2.7: Configure Redfish BMC emulator on KVM host
+- name: configure redfish bmc
+  hosts: role_kvm
+  gather_facts: false
+  roles:
+    - role: redfish_bmc
+
+# Step 2.8: Apply STIG - private hosts first while bastion repo is still serving
 - name: apply stig on private hosts
-  hosts: role_services:role_registry
+  hosts: role_services:role_registry:role_kvm
   gather_facts: false
   roles:
     - role: rhel_hardening

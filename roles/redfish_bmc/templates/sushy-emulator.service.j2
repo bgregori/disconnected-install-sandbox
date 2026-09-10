@@ -1,0 +1,14 @@
+[Unit]
+Description=Sushy Redfish BMC Emulator
+After=libvirtd.service
+Requires=libvirtd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sushy-emulator --config /etc/sushy/sushy-emulator.conf
+Restart=on-failure
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

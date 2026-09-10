@@ -4,7 +4,7 @@ rhel_hardening_apply_stig: true
 rhel_hardening_stig_profile: xccdf_org.ssgproject.content_profile_stig
 rhel_hardening_stig_datastream: /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml
 rhel_hardening_stig_results_dir: /var/log/openscap
-rhel_hardening_reboot_timeout: 600
+rhel_hardening_reboot_timeout: 1200
 
 # Bastion repo for air-gapped package installation
 rhel_hardening_bastion_repo_url: "http://{{ bastion_private_ip }}:{{ bastion_repo_port }}/rhel9-local"

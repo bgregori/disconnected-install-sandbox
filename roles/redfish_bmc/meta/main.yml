@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  author: bgregori
+  license: GPL-3.0-or-later
+  role_name: redfish_bmc
+  description: Install and configure sushy-emulator as Redfish BMC for KVM VMs
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+dependencies: []

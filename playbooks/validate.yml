@@ -16,7 +16,7 @@
         msg: "FIPS: {{ fips_status.stdout | trim }}"
 
 - name: validate air-gap on private hosts
-  hosts: role_services:role_registry
+  hosts: role_services:role_registry:role_kvm
   gather_facts: false
 
   tasks:
@@ -34,33 +34,30 @@
         msg: "Air-gap confirmed — no internet connectivity from {{ inventory_hostname }}"
 
 - name: validate dns service
-  hosts: role_services:role_registry
+  hosts: role_services:role_registry:role_kvm
   gather_facts: false
 
   tasks:
     - name: resolve api endpoint
       ansible.builtin.command:
-        cmd: "dig +short api.{{ cluster_domain }}"
+        cmd: "getent ahosts api.{{ cluster_domain }}"
       register: dns_api
       changed_when: false
-      failed_when: dns_api.stdout | trim | length == 0
 
     - name: resolve wildcard apps
       ansible.builtin.command:
-        cmd: "dig +short test.apps.{{ cluster_domain }}"
+        cmd: "getent ahosts test.apps.{{ cluster_domain }}"
       register: dns_apps
       changed_when: false
-      failed_when: dns_apps.stdout | trim | length == 0
 
     - name: resolve registry
       ansible.builtin.command:
-        cmd: "dig +short registry.{{ cluster_domain }}"
+        cmd: "getent ahosts registry.{{ cluster_domain }}"
       register: dns_registry
       changed_when: false
-      failed_when: dns_registry.stdout | trim | length == 0
 
 - name: validate ntp service
-  hosts: role_services:role_registry
+  hosts: role_services:role_registry:role_kvm
   gather_facts: false
 
   tasks:
@@ -100,6 +97,61 @@
           - "':443' in haproxy_ports.stdout"
         fail_msg: "HAProxy is not listening on required ports"
         success_msg: "HAProxy is bound to :6443 and :443"
+
+- name: validate kvm host and redfish bmc
+  hosts: role_kvm
+  gather_facts: false
+
+  tasks:
+    - name: verify libvirtd is running
+      ansible.builtin.systemd:
+        name: libvirtd
+        state: started
+      check_mode: true
+      register: validate_libvirtd
+      failed_when: validate_libvirtd.changed
+
+    - name: list all vm domains
+      ansible.builtin.command:
+        cmd: virsh list --all --name
+      register: validate_virsh_list
+      changed_when: false
+
+    - name: assert ocp node vms are defined
+      ansible.builtin.assert:
+        that:
+          - "'ocp-node-0' in validate_virsh_list.stdout"
+          - "'ocp-node-1' in validate_virsh_list.stdout"
+          - "'ocp-node-2' in validate_virsh_list.stdout"
+        fail_msg: "Expected 3 OCP node VMs but got: {{ validate_virsh_list.stdout }}"
+        success_msg: "All 3 OCP node VMs are defined"
+
+    - name: verify sushy-emulator is running
+      ansible.builtin.systemd:
+        name: sushy-emulator
+        state: started
+      check_mode: true
+      register: validate_sushy
+      failed_when: validate_sushy.changed
+
+    - name: verify redfish api responds
+      ansible.builtin.uri:
+        url: "http://{{ kvm_private_ip }}:{{ redfish_port }}/redfish/v1/"
+        method: GET
+        status_code: 200
+      register: validate_redfish
+
+    - name: verify redfish lists systems
+      ansible.builtin.uri:
+        url: "http://{{ kvm_private_ip }}:{{ redfish_port }}/redfish/v1/Systems/"
+        method: GET
+        return_content: true
+        status_code: 200
+      register: validate_redfish_systems
+
+    - name: report redfish systems count
+      ansible.builtin.debug:
+        msg: "Redfish BMC: {{ validate_redfish_systems.json.Members | length }} systems registered"
 
 - name: validate route53 records
   hosts: localhost
@@ -144,5 +196,7 @@
           - "API endpoint:     https://api.{{ cluster_domain }}:6443"
           - "Console:          https://console-openshift-console.apps.{{ cluster_domain }}"
           - "Registry host:    registry.{{ cluster_domain }} (not yet configured — use mirror-registry)"
+          - "{% if enable_kvm_host | default(false) %}KVM host:         kvm.{{ cluster_domain }} (Redfish BMC on :{{ redfish_port }}){% endif %}"
           - ""
           - "The sandbox is ready for disconnected OpenShift 4 installation."
+          - "{% if enable_kvm_host | default(false) %}Install method:   Agent-Based Installer (ABI) via Redfish BMC{% endif %}"

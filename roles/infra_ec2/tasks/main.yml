@@ -44,3 +44,7 @@
 
 - name: include private host provisioning
   ansible.builtin.include_tasks: private_hosts.yml
+
+- name: include kvm host provisioning
+  ansible.builtin.include_tasks: kvm.yml
+  when: infra_ec2_enable_kvm | bool

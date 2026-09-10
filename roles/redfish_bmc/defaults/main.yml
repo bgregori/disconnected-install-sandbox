@@ -1,0 +1,5 @@
+---
+redfish_bmc_port: "{{ redfish_port }}"
+redfish_bmc_listen_ip: "{{ kvm_private_ip }}"
+redfish_bmc_libvirt_uri: "qemu:///system"
+redfish_bmc_pip_wheel_url: "http://{{ bastion_private_ip }}:{{ bastion_repo_port }}/pip-wheels"

@@ -4,16 +4,23 @@ bastion_repo_base_dir: /var/www/html/repos
 bastion_repo_name: rhel9-local
 
 bastion_repo_packages:
-  # STIG/hardening
   - openscap-scanner
   - scap-security-guide
   - libxslt
-  # DNS
   - bind
   - bind-utils
-  # NTP
   - chrony
-  # General utilities
   - tmux
   - tcpdump
   - nmap-ncat
+
+bastion_repo_kvm_packages:
+  - qemu-kvm
+  - libvirt
+  - libvirt-client
+  - virt-install
+  - python3-libvirt
+  - python3-pip
+
+bastion_repo_enable_kvm: "{{ enable_kvm_host }}"
+bastion_repo_pip_wheel_dir: "{{ bastion_repo_base_dir }}/pip-wheels"

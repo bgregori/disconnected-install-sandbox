@@ -18,6 +18,15 @@ Host registry-sandbox
     ProxyCommand ssh -W %h:%p bastion-sandbox
     StrictHostKeyChecking accept-new
 
+{% if enable_kvm_host | default(true) %}
+Host kvm-sandbox
+    HostName {{ kvm_private_ip }}
+    User {{ infra_ssh_config_user }}
+    IdentityFile {{ infra_ssh_config_key_path }}
+    ProxyCommand ssh -W %h:%p bastion-sandbox
+    StrictHostKeyChecking accept-new
+
+{% endif %}
 {% for ip in ocp_node_ips %}
 Host ocp-node-{{ loop.index0 }}-sandbox
     HostName {{ ip }}

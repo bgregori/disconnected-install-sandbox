@@ -1,0 +1,6 @@
+---
+- name: restart sushy-emulator
+  ansible.builtin.systemd:
+    name: sushy-emulator
+    daemon_reload: true
+    state: restarted

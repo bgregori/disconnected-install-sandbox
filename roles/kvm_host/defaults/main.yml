@@ -1,0 +1,9 @@
+---
+kvm_host_data_device: /dev/nvme1n1
+kvm_host_data_mount: /var/lib/libvirt/images
+kvm_host_vm_vcpu: "{{ kvm_vm_vcpu }}"
+kvm_host_vm_memory_mb: "{{ kvm_vm_memory_mb }}"
+kvm_host_vm_disk_gb: "{{ kvm_vm_disk_gb }}"
+kvm_host_ocp_node_ips: "{{ ocp_node_ips }}"
+kvm_host_network_interface: ens5
+kvm_host_cluster_name: "{{ cluster_name }}"

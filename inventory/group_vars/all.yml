@@ -46,6 +46,17 @@ registry_port: 8443
 # Bastion local yum repo - serves packages to air-gapped private hosts
 bastion_repo_port: 8080
 
+# KVM host for bare metal simulation (Agent-Based Installer)
+enable_kvm_host: true
+kvm_private_ip: "10.0.2.30"
+kvm_instance_type: m5.metal
+kvm_root_volume_size: 200
+kvm_data_volume_size: 500
+kvm_vm_vcpu: 16
+kvm_vm_memory_mb: 65536
+kvm_vm_disk_gb: 120
+redfish_port: 8000
+
 # Hardening
 rhel_hardening_enable_fips: true
 rhel_hardening_apply_stig: true

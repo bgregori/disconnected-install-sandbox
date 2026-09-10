@@ -7,3 +7,10 @@ infra_ec2_key_path: "{{ ssh_key_path }}"
 # AMI lookup filter - RHEL 9, official Red Hat account
 infra_ec2_ami_owner: "309956199498"
 infra_ec2_ami_name_filter: "RHEL-9*_HVM-*-x86_64-*-Hourly*"
+
+infra_ec2_enable_kvm: "{{ enable_kvm_host }}"
+infra_ec2_kvm_instance_type: "{{ kvm_instance_type }}"
+infra_ec2_kvm_ip: "{{ kvm_private_ip }}"
+infra_ec2_kvm_root_volume_size: "{{ kvm_root_volume_size }}"
+infra_ec2_kvm_data_volume_size: "{{ kvm_data_volume_size }}"
+infra_ec2_kvm_ocp_node_ips: "{{ ocp_node_ips }}"

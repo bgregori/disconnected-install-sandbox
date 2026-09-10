@@ -19,6 +19,8 @@ bind_dns_records:
     ip: "{{ registry_private_ip }}"
   - name: bastion
     ip: "{{ bastion_private_ip }}"
+  - name: kvm
+    ip: "{{ kvm_private_ip }}"
   - name: node-0
     ip: "{{ ocp_node_ips[0] }}"
   - name: node-1

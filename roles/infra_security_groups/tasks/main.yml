@@ -63,6 +63,10 @@
         ports: 8443
         cidr_ip: "{{ infra_security_groups_registry_ip }}/32"
         rule_desc: "Registry HTTPS - oc mirror content push"
+      - proto: tcp
+        ports: "{{ infra_security_groups_redfish_port }}"
+        cidr_ip: "{{ infra_security_groups_kvm_ip }}/32"
+        rule_desc: "Redfish BMC on KVM host"
     tags:
       Name: "{{ infra_security_groups_project_tag }}-bastion"
       Project: "{{ infra_security_groups_project_tag }}"
@@ -150,6 +154,50 @@
       Environment: sandbox
     state: present
   register: infra_security_groups_registry_result
+
+- name: create kvm host security group
+  amazon.aws.ec2_security_group:
+    name: "{{ infra_security_groups_project_tag }}-kvm-host"
+    description: "KVM host for bare metal OCP simulation"
+    vpc_id: "{{ infra_security_groups_vpc_id }}"
+    region: "{{ infra_security_groups_region }}"
+    rules:
+      - proto: tcp
+        ports: 22
+        group_id: "{{ infra_security_groups_bastion_result.group_id }}"
+        rule_desc: "SSH from bastion"
+      - proto: tcp
+        ports: "{{ infra_security_groups_redfish_port }}"
+        group_id: "{{ infra_security_groups_bastion_result.group_id }}"
+        rule_desc: "Redfish BMC from bastion"
+    rules_egress:
+      - proto: tcp
+        ports: 53
+        cidr_ip: "{{ infra_security_groups_services_ip }}/32"
+        rule_desc: "DNS to services host"
+      - proto: udp
+        ports: 53
+        cidr_ip: "{{ infra_security_groups_services_ip }}/32"
+        rule_desc: "DNS to services host"
+      - proto: udp
+        ports: 123
+        cidr_ip: "{{ infra_security_groups_services_ip }}/32"
+        rule_desc: "NTP to services host"
+      - proto: tcp
+        ports: "{{ infra_security_groups_bastion_repo_port }}"
+        cidr_ip: "{{ infra_security_groups_bastion_ip }}/32"
+        rule_desc: "Bastion local yum repo"
+      - proto: tcp
+        ports: 8443
+        cidr_ip: "{{ infra_security_groups_registry_ip }}/32"
+        rule_desc: "Registry HTTPS"
+    tags:
+      Name: "{{ infra_security_groups_project_tag }}-kvm-host"
+      Project: "{{ infra_security_groups_project_tag }}"
+      Environment: sandbox
+    state: present
+  register: infra_security_groups_kvm_result
+  when: infra_security_groups_enable_kvm | bool
 
 # OCP nodes SG - created in two passes to handle self-reference
 - name: create ocp nodes security group shell
@@ -325,3 +373,8 @@
     sg_services_id: "{{ infra_security_groups_services_result.group_id }}"
     sg_registry_id: "{{ infra_security_groups_registry_result.group_id }}"
     sg_ocp_nodes_id: "{{ infra_security_groups_ocp_nodes_result.group_id }}"
+
+- name: export kvm security group fact # noqa: var-naming[no-role-prefix]
+  ansible.builtin.set_fact:
+    sg_kvm_id: "{{ infra_security_groups_kvm_result.group_id }}"
+  when: infra_security_groups_enable_kvm | bool
