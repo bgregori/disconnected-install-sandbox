@@ -8,11 +8,11 @@ bind_dns_bastion_repo_url: "http://{{ bastion_private_ip }}:{{ bastion_repo_port
 
 bind_dns_records:
   - name: api
-    ip: "{{ ocp_node_ips[0] }}"
+    ip: "{{ api_vip }}"
   - name: api-int
-    ip: "{{ ocp_node_ips[0] }}"
+    ip: "{{ api_vip }}"
   - name: "*.apps"
-    ip: "{{ ocp_node_ips[0] }}"
+    ip: "{{ ingress_vip }}"
   - name: services
     ip: "{{ services_private_ip }}"
   - name: registry

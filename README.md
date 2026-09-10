@@ -25,7 +25,9 @@ Designed for [OPENTLC Open AWS Environments](https://labs.opentlc.com) where use
                  │            libvirt/KVM + sushy-emulator (Redfish)     │
                  │            ├── ocp-node-0 VM (10.0.2.100)            │
                  │            ├── ocp-node-1 VM (10.0.2.101)            │
-                 │            └── ocp-node-2 VM (10.0.2.102)            │
+                 │            ├── ocp-node-2 VM (10.0.2.102)            │
+                 │            ├── API VIP     (10.0.2.103, keepalived)   │
+                 │            └── Ingress VIP (10.0.2.104, keepalived)   │
                  │                                                      │
                  │      *** NO route to internet ***                    │
                  └──────────────────────────────────────────────────────┘
@@ -139,7 +141,7 @@ Runs on remote hosts via SSH through the bastion ProxyCommand tunnel:
 4. **BIND9 DNS** — authoritative zone for `ocp.{sandbox_domain}`
 5. **Chrony NTP** — local stratum 10 server (no upstream — air-gapped)
 6. **DNS/NTP clients** — all private hosts pointed at services host
-7. **HAProxy** — L4 TCP passthrough on bastion for OCP API (:6443) and apps (:443/:80)
+7. **HAProxy** — L4 TCP passthrough on bastion for OCP API (:6443) and apps (:443/:80), routes to keepalived VIPs
 8. **KVM host** (when enabled) — libvirt/KVM with 3 OCP node VMs using macvtap networking
 9. **Redfish BMC** (when enabled) — sushy-emulator for Redfish API access to VMs
 10. **DISA STIG** — OpenSCAP remediation on private hosts first, then bastion
@@ -180,6 +182,18 @@ curl -X POST http://10.0.2.30:8000/redfish/v1/Managers/<uuid>/VirtualMedia/Cd/Ac
 - Console: `https://console-openshift-console.apps.ocp.{sandbox_domain}`
 
 Both resolve via Route53 to the bastion EIP, where HAProxy forwards to the OCP nodes over the private network.
+
+## Split-Horizon DNS
+
+Two DNS views serve the same names with different targets:
+
+| Record | External (Route53) | Internal (BIND9) |
+|---|---|---|
+| `api.ocp.*` | Bastion EIP (HAProxy) | API VIP `10.0.2.103` (keepalived) |
+| `api-int.ocp.*` | not published | API VIP `10.0.2.103` (keepalived) |
+| `*.apps.ocp.*` | Bastion EIP (HAProxy) | Ingress VIP `10.0.2.104` (keepalived) |
+
+Both external and internal traffic routes through the VIPs. External clients (browser, `oc` CLI) hit Route53 -> bastion EIP -> HAProxy -> VIPs. Internal clients (OCP nodes, pods) resolve via BIND9 -> VIPs directly. OpenShift's keepalived manages the VIPs across control plane nodes for HA failover. The VIPs (`api_vip`, `ingress_vip`) are registered as secondary IPs on the KVM host ENI so AWS routes the traffic correctly.
 
 ## Project Structure
 

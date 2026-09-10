@@ -22,38 +22,29 @@ defaults
     timeout check           10s
     maxconn                 3000
 
-# Kubernetes API — TCP passthrough
+# Kubernetes API — TCP passthrough to API VIP
 frontend api
     bind *:6443
     default_backend ocp-api
 
 backend ocp-api
-    balance roundrobin
-{% for ip in bastion_haproxy_ocp_node_ips %}
-    server node-{{ loop.index0 }} {{ ip }}:6443 check
-{% endfor %}
+    server api-vip {{ bastion_haproxy_api_vip }}:6443 check
 
-# OCP apps ingress — HTTPS TCP passthrough
+# OCP apps ingress — HTTPS TCP passthrough to Ingress VIP
 frontend apps-https
     bind *:443
     default_backend ocp-apps-https
 
 backend ocp-apps-https
-    balance roundrobin
-{% for ip in bastion_haproxy_ocp_node_ips %}
-    server node-{{ loop.index0 }} {{ ip }}:443 check
-{% endfor %}
+    server ingress-vip {{ bastion_haproxy_ingress_vip }}:443 check
 
-# OCP apps ingress — HTTP
+# OCP apps ingress — HTTP to Ingress VIP
 frontend apps-http
     bind *:80
     default_backend ocp-apps-http
 
 backend ocp-apps-http
-    balance roundrobin
-{% for ip in bastion_haproxy_ocp_node_ips %}
-    server node-{{ loop.index0 }} {{ ip }}:80 check
-{% endfor %}
+    server ingress-vip {{ bastion_haproxy_ingress_vip }}:80 check
 
 # Stats (local only)
 listen stats

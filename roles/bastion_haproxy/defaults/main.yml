@@ -1,3 +1,4 @@
 ---
-bastion_haproxy_ocp_node_ips: "{{ ocp_node_ips }}"
+bastion_haproxy_api_vip: "{{ api_vip }}"
+bastion_haproxy_ingress_vip: "{{ ingress_vip }}"
 bastion_haproxy_stats_port: 9000

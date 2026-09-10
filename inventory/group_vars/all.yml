@@ -33,6 +33,10 @@ ocp_node_ips:
   - "10.0.2.101"
   - "10.0.2.102"
 
+# OpenShift VIPs — keepalived manages these on the OCP nodes
+api_vip: "10.0.2.103"
+ingress_vip: "10.0.2.104"
+
 # Instance types and volumes (in all.yml because Phase 1 runs on localhost
 # which does not load per-group group_vars)
 bastion_instance_type: t3.medium

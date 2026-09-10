@@ -235,8 +235,9 @@ L4-forwards to private OCP nodes.
 | kvm (optional)     | Private | m5.metal      | 10.0.2.30      | sg-kvm-host + sg-ocp-nodes | 200 GiB  | 500 GiB (VM images)|
 
 **KVM host** (when `enable_kvm_host: true`, default): An m5.metal bare metal instance running
-libvirt/KVM with 3 OCP node VMs using macvtap networking. OCP node IPs (10.0.2.100–102) are
-assigned as secondary private IPs on the KVM host's ENI, and source/destination check is disabled.
+libvirt/KVM with 3 OCP node VMs using macvtap networking. OCP node IPs (10.0.2.100–102) and
+VIPs (10.0.2.103–104) are assigned as secondary private IPs on the KVM host's ENI, and
+source/destination check is disabled.
 The host gets dual security groups: sg-kvm-host for host traffic (SSH, Redfish) and sg-ocp-nodes
 for VM traffic. sushy-emulator provides a Redfish BMC API on port 8000, enabling the Agent-Based
 Installer (ABI) to mount ISOs and power-cycle VMs as if they were real bare metal servers.
@@ -270,7 +271,7 @@ VPC
  │    │    └── sg-registry
  │    └── KVM EC2 (m5.metal, optional)
  │         ├── sg-kvm-host + sg-ocp-nodes (dual SG)
- │         ├── Secondary IPs: 10.0.2.{100,101,102} on ENI
+ │         ├── Secondary IPs: 10.0.2.{100,101,102,103,104} on ENI
  │         ├── Source/dest check disabled
  │         └── VMs: ocp-node-{0,1,2} via macvtap
  └── Security Groups (all reference VPC ID)
@@ -471,7 +472,7 @@ Step 1.3: infra_ec2 role
   ├── Launch services host (private subnet, 10.0.2.10)
   ├── Launch registry host (private subnet, 10.0.2.20, +200GiB EBS)
   ├── (When KVM enabled) Launch KVM host (m5.metal, 10.0.2.30, +500GiB EBS)
-  │     ├── Assign secondary IPs (10.0.2.100–102) on ENI
+  │     ├── Assign secondary IPs (10.0.2.100–104: 3 nodes + 2 VIPs) on ENI
   │     └── Disable source/destination check on ENI
   └── Wait for all instances to reach "running" state
 
@@ -561,9 +562,9 @@ Step 2.2: bind_dns role (services host)
   │     ├── forwarders: (none — authoritative only, air-gapped)
   │     └── recursion: no
   ├── Generate forward zone: ocp.{{ sandbox_domain }}
-  │     ├── api.ocp.{{ sandbox_domain }}      → 10.0.2.100 (VIP or first node)
-  │     ├── api-int.ocp.{{ sandbox_domain }}  → 10.0.2.100
-  │     ├── *.apps.ocp.{{ sandbox_domain }}   → 10.0.2.100 (wildcard A record)
+  │     ├── api.ocp.{{ sandbox_domain }}      → 10.0.2.103 (API VIP)
+  │     ├── api-int.ocp.{{ sandbox_domain }}  → 10.0.2.103 (API VIP)
+  │     ├── *.apps.ocp.{{ sandbox_domain }}   → 10.0.2.104 (Ingress VIP)
   │     ├── services.ocp.{{ sandbox_domain }} → 10.0.2.10
   │     ├── registry.ocp.{{ sandbox_domain }} → 10.0.2.20
   │     ├── bastion.ocp.{{ sandbox_domain }}  → 10.0.1.10
@@ -768,6 +769,8 @@ inventory/group_vars/all.yml          # Lowest precedence — global defaults
   ├── services_private_ip: 10.0.2.10
   ├── registry_private_ip: 10.0.2.20
   ├── ocp_node_ips: [10.0.2.100, 10.0.2.101, 10.0.2.102]  # for DNS + HAProxy
+  ├── api_vip: 10.0.2.103                 # keepalived API VIP (BIND9 api/api-int)
+  ├── ingress_vip: 10.0.2.104             # keepalived Ingress VIP (BIND9 *.apps)
   │
   │ INSTANCE TYPES & VOLUMES (here, not per-group, because Phase 1 runs
   │ on localhost which does not load per-group group_vars):
@@ -865,24 +868,19 @@ Console and API from the internet. The bastion bridges this gap as an L4 reverse
   │                                     │
   │  HAProxy (TCP mode, L4)             │
   │  ├── *:6443 → backend api           │
-  │  │     server node-0 10.0.2.100:6443│
-  │  │     server node-1 10.0.2.101:6443│
-  │  │     server node-2 10.0.2.102:6443│
+  │  │     server api-vip 10.0.2.103    │
   │  ├── *:443  → backend apps          │
-  │  │     server node-0 10.0.2.100:443 │
-  │  │     server node-1 10.0.2.101:443 │
-  │  │     server node-2 10.0.2.102:443 │
+  │  │     server ingress-vip 10.0.2.104│
   │  └── *:80   → backend apps-http     │
-  │        server node-0 10.0.2.100:80  │
-  │        server node-1 10.0.2.101:80  │
-  │        server node-2 10.0.2.102:80  │
+  │        server ingress-vip 10.0.2.104│
   └──────────────────┬──────────────────┘
                      │ VPC local route (10.0.0.0/16)
                      ▼
   ┌─────────────────────────────────────┐
-  │ OCP NODES (Private Subnet)          │
+  │ OCP NODES (Private Subnet, KVM VMs)  │
   │  10.0.2.{100,101,102}               │
-  │  Created by IPI installer           │
+  │  API VIP: 10.0.2.103 (keepalived)   │
+  │  Ingress VIP: 10.0.2.104 (keepalvd) │
   │  *** Still NO internet access ***   │
   └─────────────────────────────────────┘
 ```
@@ -891,15 +889,18 @@ Console and API from the internet. The bastion bridges this gap as an L4 reverse
 
 Two DNS views serve the same names with different targets:
 
-| Record                                  | External (Route53)   | Internal (BIND9)      |
-|-----------------------------------------|----------------------|-----------------------|
-| `api.ocp.{{ sandbox_domain }}`          | → Bastion EIP        | → 10.0.2.100          |
-| `api-int.ocp.{{ sandbox_domain }}`      | (not published)      | → 10.0.2.100          |
-| `*.apps.ocp.{{ sandbox_domain }}`       | → Bastion EIP        | → 10.0.2.100          |
-| `registry.ocp.{{ sandbox_domain }}`     | (not published)      | → 10.0.2.20           |
+| Record                                  | External (Route53)   | Internal (BIND9)          |
+|-----------------------------------------|----------------------|---------------------------|
+| `api.ocp.{{ sandbox_domain }}`          | → Bastion EIP        | → 10.0.2.103 (API VIP)    |
+| `api-int.ocp.{{ sandbox_domain }}`      | (not published)      | → 10.0.2.103 (API VIP)    |
+| `*.apps.ocp.{{ sandbox_domain }}`       | → Bastion EIP        | → 10.0.2.104 (Ingress VIP)|
+| `registry.ocp.{{ sandbox_domain }}`     | (not published)      | → 10.0.2.20               |
 
-External clients (browser, `oc` CLI) resolve via Route53 → bastion EIP → HAProxy → OCP nodes.
-Internal clients (OCP nodes, registry) resolve via BIND9 → private IPs directly.
+External clients (browser, `oc` CLI) resolve via Route53 → bastion EIP → HAProxy → OCP nodes
+(round-robin across all 3 nodes). Internal clients (OCP nodes, pods) resolve via BIND9 →
+keepalived VIPs, which float between nodes for HA failover. The VIPs are separate IPs not
+assigned to any specific node — OpenShift's keepalived manages them across the control plane.
+Both VIPs are registered as secondary IPs on the KVM host ENI so AWS routes the traffic.
 
 ### 7.3 Why HAProxy in TCP Mode
 
