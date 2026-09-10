@@ -1,17 +1,16 @@
 # Disconnected OpenShift AWS Sandbox — Architecture Blueprint
 
-## 0. Operator Environment (OPENTLC Open Environment)
+## 0. Operator Environment
 
-Users provision an **Open AWS Environment** via OPENTLC, which provides:
+You need an AWS account with permissions to create VPC, EC2, Route53, and security group
+resources, plus a Route53 hosted zone for your domain.
 
-| Credential                | Example Value                                    | Handling                         |
-|---------------------------|--------------------------------------------------|----------------------------------|
-| `AWS_ACCESS_KEY_ID`       | `AKIA...`                                        | Export as env var, NEVER commit  |
-| `AWS_SECRET_ACCESS_KEY`   | `wJalr...`                                       | Export as env var, NEVER commit  |
-| Route53 domain            | `.sandbox2229.opentlc.com`                       | Required variable: `sandbox_domain` |
-| AWS Console URL           | `https://859881501468.signin.aws.amazon.com/console` | For manual verification only  |
-| AWS Console credentials   | `open-environment-txd6c-admin / ********`        | For manual verification only     |
-| AWS Region                | User's choice (no default)                       | Required variable: `aws_region`  |
+| Credential                | Example Value                | Handling                         |
+|---------------------------|------------------------------|----------------------------------|
+| `AWS_ACCESS_KEY_ID`       | `AKIA...`                    | Export as env var, NEVER commit  |
+| `AWS_SECRET_ACCESS_KEY`   | `wJalr...`                   | Export as env var, NEVER commit  |
+| Route53 hosted zone       | `example.com`                | Required variable: `sandbox_domain` |
+| AWS Region                | User's choice (no default)   | Required variable: `aws_region`  |
 
 **Required user-provided variables (no defaults — playbook fails fast if missing):**
 
@@ -21,12 +20,17 @@ export AWS_SECRET_ACCESS_KEY="wJalr..."
 
 ansible-playbook playbooks/site.yml \
   -e aws_region=us-east-2 \
-  -e sandbox_domain=sandbox2229.opentlc.com \
+  -e sandbox_domain=example.com \
   -e admin_cidr=$(curl -s ifconfig.me)/32
 ```
 
-The domain `sandbox_domain` is the OPENTLC-delegated Route53 zone. All DNS records
-are created under `ocp.{{ sandbox_domain }}` (e.g., `api.ocp.sandbox2229.opentlc.com`).
+The `sandbox_domain` is the Route53 hosted zone where DNS records will be created.
+All records are created under `ocp.{{ sandbox_domain }}` (e.g., `api.ocp.example.com`).
+
+> **Red Hat OpenShift Solutions Architects:** The **Open AWS Environment** catalog item in
+> the [Red Hat Demo Platform](https://demo.redhat.com) provides an ephemeral AWS account
+> with a delegated Route53 domain — ideal for sandbox use without touching personal or
+> customer AWS accounts.
 
 ---
 
@@ -79,7 +83,7 @@ disconnected-openshift-aws-sandbox/
 │   │   ├── templates/ssh_config.j2
 │   │   └── defaults/main.yml
 │   │
-│   ├── infra_route53/                      # Route53 A records in OPENTLC-delegated zone
+│   ├── infra_route53/                      # Route53 A records in existing hosted zone
 │   │   ├── tasks/main.yml
 │   │   ├── defaults/main.yml
 │   │   └── meta/main.yml
@@ -219,11 +223,10 @@ persist within the same play.
 | Route53 A Record      | `api.ocp.{{ sandbox_domain }}`    | → Bastion EIP (HAProxy → OCP nodes :6443)        |
 | Route53 A Record      | `*.apps.ocp.{{ sandbox_domain }}` | → Bastion EIP (HAProxy → OCP nodes :443)          |
 
-**Route53 note:** The OPENTLC Open Environment provides a delegated hosted zone for
-`{{ sandbox_domain }}`. We create records in that existing zone — no new zone needed.
-Route53 records are created in Phase 1 (alongside EC2 provisioning) using the bastion EIP
-from `infra_ec2`. The bastion EIP is the public entry point; HAProxy on the bastion
-L4-forwards to private OCP nodes.
+**Route53 note:** Records are created in an existing hosted zone for `{{ sandbox_domain }}`
+— no new zone is created. Route53 records are created in Phase 1 (alongside EC2 provisioning)
+using the bastion EIP from `infra_ec2`. The bastion EIP is the public entry point; HAProxy
+on the bastion L4-forwards to the keepalived VIPs on the private subnet.
 
 ### 2.2 EC2 Instances
 
@@ -437,7 +440,7 @@ Created when `enable_kvm_host: true`. The KVM host also gets `sg-ocp-nodes` assi
 - `amazon.aws` collection >= 7.0.0
 - `community.crypto` collection (available for TLS operations if needed)
 - AWS credentials exported as env vars (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
-- OPENTLC Open Environment provisioned (provides Route53 domain + credentials)
+- Route53 hosted zone for your domain
 - Operator's public IP known (`admin_cidr` variable)
 
 ### 4.2 Phase 1 — Provision AWS Infrastructure
@@ -745,7 +748,7 @@ inventory/group_vars/all.yml          # Lowest precedence — global defaults
   │
   │ REQUIRED (no defaults — must be provided at runtime):
   ├── aws_region: (none)              # e.g., us-east-2
-  ├── sandbox_domain: (none)          # e.g., sandbox2229.opentlc.com
+  ├── sandbox_domain: (none)          # e.g., example.com
   ├── admin_cidr: (none)              # e.g., 203.0.113.42/32
   │
   │ NETWORKING:
@@ -859,8 +862,8 @@ Console and API from the internet. The bastion bridges this gap as an L4 reverse
   Browser / oc CLI
        │
        ▼
-  Route53: api.ocp.sandbox2229.opentlc.com → Bastion EIP
-  Route53: *.apps.ocp.sandbox2229.opentlc.com → Bastion EIP
+  Route53: api.ocp.example.com → Bastion EIP
+  Route53: *.apps.ocp.example.com → Bastion EIP
        │
        ▼
   ┌─────────────────────────────────────┐

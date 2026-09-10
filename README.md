@@ -2,8 +2,6 @@
 
 Ansible playbooks that provision an isolated AWS sandbox simulating a **disconnected OpenShift 4** installation target. The private subnet is fully air-gapped — no NAT gateway, no internet gateway routes, no VPC endpoints.
 
-Designed for [OPENTLC Open AWS Environments](https://labs.opentlc.com) where users receive ephemeral AWS credentials and a delegated Route53 domain.
-
 ## What Gets Built
 
 ```
@@ -43,30 +41,33 @@ The **registry host** is provisioned as infrastructure only — registry softwar
 
 - Ansible >= 2.15 with Python >= 3.9
 - boto3 >= 1.28.0
-- An OPENTLC Open AWS Environment (provides AWS credentials + Route53 domain)
+- An AWS account with permissions to create VPC, EC2, Route53, and security group resources
+- A Route53 hosted zone for your domain (the playbooks create A records in an existing zone)
 
 ```bash
 ansible-galaxy collection install -r requirements.yml
 pip install boto3 botocore
 ```
 
+> **Note for Red Hat OpenShift Solutions Architects:** You can use the **Open AWS Environment** catalog item in the [Red Hat Demo Platform](https://demo.redhat.com) to get an ephemeral AWS account with a delegated Route53 domain — ideal for sandbox use without touching personal or customer AWS accounts.
+
 ## Quick Start
 
-1. **Export your AWS credentials** (from your OPENTLC environment email):
+1. **Export your AWS credentials**:
 
 ```bash
 export AWS_ACCESS_KEY_ID="AKIA..."
 export AWS_SECRET_ACCESS_KEY="wJalr..."
 ```
 
-> **Never commit these credentials.** If detected, your OPENTLC environment will be deleted without warning.
+> **Never commit these credentials to a git repository.**
 
 2. **Run the full provision + configure**:
 
 ```bash
 ansible-playbook playbooks/site.yml \
   -e aws_region=us-east-2 \
-  -e sandbox_domain=sandbox2229.opentlc.com \
+  -e sandbox_domain=example.com \
   -e admin_cidr=$(curl -s ifconfig.me)/32
 ```
 
@@ -75,7 +76,7 @@ This runs both phases sequentially. To skip the KVM bare metal host (saves ~$4.6
 ```bash
 ansible-playbook playbooks/site.yml \
   -e aws_region=us-east-2 \
-  -e sandbox_domain=sandbox2229.opentlc.com \
+  -e sandbox_domain=example.com \
   -e admin_cidr=$(curl -s ifconfig.me)/32 \
   -e enable_kvm_host=false
 ```
@@ -86,7 +87,7 @@ You can also run the phases independently:
 # Phase 1 only — AWS infrastructure (VPC, SGs, EC2, SSH config, Route53)
 ansible-playbook playbooks/phase1_provision.yml \
   -e aws_region=us-east-2 \
-  -e sandbox_domain=sandbox2229.opentlc.com \
+  -e sandbox_domain=example.com \
   -e admin_cidr=$(curl -s ifconfig.me)/32
 
 # Phase 2 only — configure RHEL 9 services (requires Phase 1 complete)
@@ -97,7 +98,7 @@ ansible-playbook playbooks/phase2_configure.yml
 
 ```bash
 ansible-playbook playbooks/validate.yml \
-  -e sandbox_domain=sandbox2229.opentlc.com
+  -e sandbox_domain=example.com
 ```
 
 4. **Tear down everything** when done:
@@ -105,7 +106,7 @@ ansible-playbook playbooks/validate.yml \
 ```bash
 ansible-playbook playbooks/teardown.yml \
   -e aws_region=us-east-2 \
-  -e sandbox_domain=sandbox2229.opentlc.com
+  -e sandbox_domain=example.com
 ```
 
 ## Required Variables
@@ -115,7 +116,7 @@ These have **no defaults** — playbooks fail fast if not provided:
 | Variable | Source | Example |
 |---|---|---|
 | `aws_region` | Your choice | `us-east-2` |
-| `sandbox_domain` | OPENTLC environment email | `sandbox2229.opentlc.com` |
+| `sandbox_domain` | Your Route53 hosted zone | `example.com` |
 | `admin_cidr` | Your public IP + /32 | `203.0.113.42/32` |
 
 ## Two-Phase Execution
@@ -181,7 +182,7 @@ curl -X POST http://10.0.2.30:8000/redfish/v1/Managers/<uuid>/VirtualMedia/Cd/Ac
 - API: `https://api.ocp.{sandbox_domain}:6443`
 - Console: `https://console-openshift-console.apps.ocp.{sandbox_domain}`
 
-Both resolve via Route53 to the bastion EIP, where HAProxy forwards to the OCP nodes over the private network.
+Both resolve via Route53 to the bastion EIP, where HAProxy forwards to the keepalived VIPs over the private network.
 
 ## Split-Horizon DNS
 

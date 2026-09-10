@@ -16,7 +16,7 @@
           Missing required variables. Run with:
           ansible-playbook playbooks/phase1_provision.yml
           -e aws_region=us-east-2
-          -e sandbox_domain=sandboxNNNN.opentlc.com
+          -e sandbox_domain=example.com
           -e admin_cidr=$(curl -s ifconfig.me)/32
 
     - name: validate aws credentials are available

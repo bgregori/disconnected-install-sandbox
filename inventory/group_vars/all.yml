@@ -2,7 +2,7 @@
 # Required variables - playbooks fail if these are not provided at runtime.
 # Pass via -e on the command line:
 #   -e aws_region=us-east-2
-#   -e sandbox_domain=sandbox2229.opentlc.com
+#   -e sandbox_domain=example.com
 #   -e admin_cidr=$(curl -s ifconfig.me)/32
 #
 # AWS credentials must be exported as environment variables:

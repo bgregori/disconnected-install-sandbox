@@ -17,7 +17,7 @@ execution workflow, and variable hierarchy.
 - Ansible >= 2.15 with Python >= 3.9
 - Collections: `amazon.aws >= 7.0.0`, `community.crypto >= 2.0.0`
 - boto3 >= 1.28.0 (required by amazon.aws)
-- OPENTLC Open Environment provisioned (provides AWS creds + Route53 domain)
+- AWS account with VPC/EC2/Route53/SG permissions + a Route53 hosted zone
 
 Install dependencies:
 ```bash
@@ -32,7 +32,7 @@ These have NO defaults — playbooks fail fast if not provided:
 | Variable | Source | Example |
 |---|---|---|
 | `aws_region` | User choice | `us-east-2` |
-| `sandbox_domain` | OPENTLC environment email | `sandbox2229.opentlc.com` |
+| `sandbox_domain` | Your Route53 hosted zone | `example.com` |
 | `admin_cidr` | Operator's public IP | `203.0.113.42/32` |
 
 AWS credentials MUST be exported as environment variables (never in playbooks):
@@ -47,13 +47,13 @@ export AWS_SECRET_ACCESS_KEY="wJalr..."
 # Full provision + configure
 ansible-playbook playbooks/site.yml \
   -e aws_region=us-east-2 \
-  -e sandbox_domain=sandbox2229.opentlc.com \
+  -e sandbox_domain=example.com \
   -e admin_cidr=$(curl -s ifconfig.me)/32
 
 # Phase 1 only: AWS infrastructure
 ansible-playbook playbooks/phase1_provision.yml \
   -e aws_region=us-east-2 \
-  -e sandbox_domain=sandbox2229.opentlc.com \
+  -e sandbox_domain=example.com \
   -e admin_cidr=$(curl -s ifconfig.me)/32
 
 # Phase 2 only: configure RHEL services (requires Phase 1 complete)
@@ -65,7 +65,7 @@ ansible-playbook playbooks/validate.yml -i inventory/aws_ec2.yml
 # Teardown everything
 ansible-playbook playbooks/teardown.yml \
   -e aws_region=us-east-2 \
-  -e sandbox_domain=sandbox2229.opentlc.com
+  -e sandbox_domain=example.com
 
 # Lint
 ansible-lint playbooks/ roles/
