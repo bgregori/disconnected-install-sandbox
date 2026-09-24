@@ -5,5 +5,8 @@ kvm_host_vm_vcpu: "{{ kvm_vm_vcpu }}"
 kvm_host_vm_memory_mb: "{{ kvm_vm_memory_mb }}"
 kvm_host_vm_disk_gb: "{{ kvm_vm_disk_gb }}"
 kvm_host_ocp_node_ips: "{{ ocp_node_ips }}"
-kvm_host_network_interface: ens5
+kvm_host_network_interface: "{{ ansible_default_ipv4.interface }}"
+kvm_host_bridge_name: virbr1
+kvm_host_private_ip: "{{ kvm_private_ip }}"
+kvm_host_private_cidr: "{{ private_subnet_cidr }}"
 kvm_host_cluster_name: "{{ cluster_name }}"

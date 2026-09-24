@@ -3,6 +3,30 @@
 # Requires: Phase 1 complete, dynamic inventory populated
 # Connection: SSH via bastion ProxyCommand
 
+# Set hostnames on all hosts
+- name: set bastion hostname
+  hosts: role_bastion
+  gather_facts: false
+  vars:
+    ansible_ssh_common_args: ""
+  tasks:
+    - name: set hostname to bastion
+      ansible.builtin.hostname:
+        name: bastion
+
+- name: set private host hostnames
+  hosts: role_services:role_registry:role_kvm
+  gather_facts: false
+  tasks:
+    - name: set hostname
+      ansible.builtin.hostname:
+        name: "{{ sandbox_role_hostnames[aws_tags.sandbox_role] }}"
+      vars:
+        sandbox_role_hostnames:
+          services: services
+          registry: registry
+          kvm: kvm
+
 # Step 2.0: Set up bastion as local yum repo + content relay
 - name: configure bastion as package repo
   hosts: role_bastion
@@ -31,6 +55,57 @@
         baseurl: "http://{{ bastion_private_ip }}:{{ bastion_repo_port }}/rhel9-local"
         enabled: true
         gpgcheck: false
+
+# Step 2.0.2: Format and mount registry data volume
+- name: prepare registry data volume
+  hosts: role_registry
+  gather_facts: false
+  tasks:
+    - name: create filesystem on data volume
+      community.general.filesystem:
+        fstype: xfs
+        dev: /dev/nvme1n1
+      register: phase2_registry_mkfs
+
+    - name: create data mount point
+      ansible.builtin.file:
+        path: /data
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: mount data volume
+      ansible.posix.mount:
+        path: /data
+        src: /dev/nvme1n1
+        fstype: xfs
+        state: mounted
+
+    - name: set data directory ownership
+      ansible.builtin.file:
+        path: /data
+        owner: ec2-user
+        group: ec2-user
+        mode: "0755"
+
+    - name: create quay systemd override directory
+      ansible.builtin.file:
+        path: /home/ec2-user/.config/systemd/user/quay-app.service.d
+        state: directory
+        owner: ec2-user
+        group: ec2-user
+        mode: "0755"
+
+    - name: create quay-app permissions fix for stig umask
+      ansible.builtin.copy:
+        content: |
+          [Service]
+          ExecStartPre=/bin/bash -c 'chmod -R 755 /data/quay/quay-config /data/quay/quay-rootCA 2>/dev/null; chmod 644 /data/quay/quay-config/* /data/quay/quay-rootCA/* 2>/dev/null; true'
+        dest: /home/ec2-user/.config/systemd/user/quay-app.service.d/fix-perms.conf
+        owner: ec2-user
+        group: ec2-user
+        mode: "0644"
 
 # Step 2.1: Enable FIPS on all hosts (requires reboot)
 - name: enable fips on bastion
@@ -70,6 +145,97 @@
   roles:
     - role: common_client
 
+# Step 2.4.1: Configure bastion to use internal DNS (with AWS fallback)
+- name: configure bastion dns client
+  hosts: role_bastion
+  gather_facts: false
+  vars:
+    ansible_ssh_common_args: ""
+  tasks:
+    - name: disable networkmanager dns management
+      ansible.builtin.copy:
+        content: |
+          [main]
+          dns=none
+        dest: /etc/NetworkManager/conf.d/90-dns-none.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: reload networkmanager
+
+    - name: configure dns resolver with internal and aws fallback
+      ansible.builtin.template:
+        src: bastion-resolv.conf.j2
+        dest: /etc/resolv.conf
+        owner: root
+        group: root
+        mode: "0644"
+
+  handlers:
+    - name: reload networkmanager
+      ansible.builtin.systemd:
+        name: NetworkManager
+        state: reloaded
+
+# Step 2.4.2: Generate bastion-to-private SSH key and distribute to internal hosts
+- name: generate bastion internal ssh key
+  hosts: role_bastion
+  gather_facts: false
+  vars:
+    ansible_ssh_common_args: ""
+    bastion_internal_key: /home/ec2-user/.ssh/bastion-internal
+  tasks:
+    - name: generate ssh key pair for internal access
+      community.crypto.openssh_keypair:
+        path: "{{ bastion_internal_key }}"
+        type: ecdsa
+        size: 521
+        owner: ec2-user
+        group: ec2-user
+        mode: "0600"
+        comment: "bastion-internal@{{ cluster_domain }}"
+      register: bastion_internal_keypair
+
+    - name: read public key
+      ansible.builtin.slurp:
+        src: "{{ bastion_internal_key }}.pub"
+      register: bastion_internal_pubkey
+
+    - name: configure bastion ssh client for internal hosts
+      ansible.builtin.copy:
+        content: |
+          Host services services.{{ cluster_domain }}
+            HostName {{ services_private_ip }}
+            User ec2-user
+            IdentityFile {{ bastion_internal_key }}
+            StrictHostKeyChecking no
+
+          Host registry registry.{{ cluster_domain }}
+            HostName {{ registry_private_ip }}
+            User ec2-user
+            IdentityFile {{ bastion_internal_key }}
+            StrictHostKeyChecking no
+
+          Host kvm kvm.{{ cluster_domain }}
+            HostName {{ kvm_private_ip }}
+            User ec2-user
+            IdentityFile {{ bastion_internal_key }}
+            StrictHostKeyChecking no
+        dest: /home/ec2-user/.ssh/config
+        owner: ec2-user
+        group: ec2-user
+        mode: "0600"
+
+- name: distribute bastion public key to private hosts
+  hosts: role_services:role_registry:role_kvm
+  gather_facts: false
+  tasks:
+    - name: authorize bastion internal key
+      ansible.posix.authorized_key:
+        user: ec2-user
+        key: "{{ hostvars[groups['role_bastion'][0]]['bastion_internal_pubkey']['content'] | b64decode }}"
+        state: present
+
 # Step 2.5: Configure HAProxy ingress on bastion
 - name: configure bastion haproxy
   hosts: role_bastion
@@ -100,6 +266,10 @@
   roles:
     - role: rhel_hardening
       rhel_hardening_enable_fips: false
+      rhel_hardening_firewall_ports: >-
+        {{ ['8443/tcp'] if 'role_registry' in group_names else [] }}
+        + {{ ['8888/tcp', '8000/tcp'] if 'role_kvm' in group_names else [] }}
+        + {{ ['53/tcp', '53/udp', '123/udp'] if 'role_services' in group_names else [] }}
 
 - name: apply stig on bastion
   hosts: role_bastion
@@ -109,3 +279,8 @@
   roles:
     - role: rhel_hardening
       rhel_hardening_enable_fips: false
+      rhel_hardening_firewall_ports:
+        - "{{ bastion_repo_port }}/tcp"
+        - 6443/tcp
+        - 443/tcp
+        - 80/tcp

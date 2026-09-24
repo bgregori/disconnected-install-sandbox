@@ -148,6 +148,14 @@
         ports: "{{ infra_security_groups_bastion_repo_port }}"
         cidr_ip: "{{ infra_security_groups_bastion_ip }}/32"
         rule_desc: "Bastion local yum repo"
+      - proto: tcp
+        ports: 6443
+        cidr_ip: "{{ infra_security_groups_api_vip }}/32"
+        rule_desc: "Kubernetes API to OCP cluster"
+      - proto: tcp
+        ports: 443
+        cidr_ip: "{{ infra_security_groups_ingress_vip }}/32"
+        rule_desc: "HTTPS routes to OCP cluster"
     tags:
       Name: "{{ infra_security_groups_project_tag }}-registry"
       Project: "{{ infra_security_groups_project_tag }}"
@@ -229,14 +237,14 @@
         ports: 22
         group_id: "{{ infra_security_groups_bastion_result.group_id }}"
         rule_desc: "SSH from bastion"
-      # External-facing (from VPC)
+      # External-facing (from VPC — bastion HAProxy is on public subnet)
       - proto: tcp
         ports: 80
-        cidr_ip: "{{ infra_security_groups_private_subnet_cidr }}"
+        cidr_ip: "{{ infra_security_groups_vpc_cidr }}"
         rule_desc: "HTTP routes"
       - proto: tcp
         ports: 443
-        cidr_ip: "{{ infra_security_groups_private_subnet_cidr }}"
+        cidr_ip: "{{ infra_security_groups_vpc_cidr }}"
         rule_desc: "HTTPS routes"
       - proto: tcp
         ports: 6443

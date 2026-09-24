@@ -13,6 +13,13 @@ bastion_repo_packages:
   - tmux
   - tcpdump
   - nmap-ncat
+  - fapolicyd
+  - firewalld
+  - aide
+  - rsyslog
+  - audit
+  - policycoreutils-python-utils
+  - nmstate
 
 bastion_repo_kvm_packages:
   - qemu-kvm

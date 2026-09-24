@@ -14,3 +14,6 @@ $TTL 86400
 {{ record.ip.split('.')[-1] }}   IN  PTR  {{ record.name }}.{{ bind_dns_zone }}.
 {% endif %}
 {% endfor %}
+{% for ip in bind_dns_ocp_node_ips %}
+{{ ip.split('.')[-1] }}   IN  PTR  {{ 'node-' ~ loop.index0 }}.{{ bind_dns_zone }}.
+{% endfor %}

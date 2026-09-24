@@ -19,6 +19,7 @@
     path: "{{ kvm_host_data_mount }}"
     src: "{{ kvm_host_data_device }}"
     fstype: xfs
+    opts: defaults,nodev,nofail
     state: mounted
 
 - name: mask modular libvirt daemons that conflict with libvirtd
@@ -65,6 +66,86 @@
   register: kvm_host_net_undefine
   changed_when: kvm_host_net_undefine.rc == 0
   failed_when: false
+
+- name: define default storage pool for virtual media
+  ansible.builtin.command:
+    cmd: virsh pool-define-as default dir --target {{ kvm_host_data_mount }}
+  register: kvm_host_pool_define
+  changed_when: kvm_host_pool_define.rc == 0
+  failed_when: false
+
+- name: start default storage pool
+  ansible.builtin.command:
+    cmd: virsh pool-start default
+  register: kvm_host_pool_start
+  changed_when: kvm_host_pool_start.rc == 0
+  failed_when: false
+
+- name: autostart default storage pool
+  ansible.builtin.command:
+    cmd: virsh pool-autostart default
+  register: kvm_host_pool_autostart
+  changed_when: kvm_host_pool_autostart.rc == 0
+  failed_when: false
+
+- name: disable nm-cloud-setup to prevent dhcp claiming secondary ips
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop:
+    - nm-cloud-setup.service
+    - nm-cloud-setup.timer
+  failed_when: false
+
+- name: pin eth0 to static ip
+  community.general.nmcli:
+    conn_name: "System {{ kvm_host_network_interface }}"
+    type: ethernet
+    ip4: "{{ kvm_host_private_ip }}/24"
+    gw4: "{{ kvm_host_private_cidr | ansible.utils.ipaddr('1') | ansible.utils.ipaddr('address') }}"
+    dns4: "{{ services_private_ip }}"
+    method4: manual
+    state: present
+  notify: reload networkmanager
+
+- name: create ocp bridge with /32 address and node routes
+  community.general.nmcli:
+    conn_name: "{{ kvm_host_bridge_name }}"
+    type: bridge
+    ip4: "{{ kvm_host_private_ip }}/32"
+    method4: manual
+    routes4: >-
+      {{ kvm_host_ocp_node_ips | map('regex_replace', '$', '/32') | list }}
+    state: present
+  notify: reload networkmanager
+
+- name: flush handlers to activate bridge
+  ansible.builtin.meta: flush_handlers
+
+- name: enable ip forwarding and proxy arp
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    reload: true
+    state: present
+  loop:
+    - name: net.ipv4.ip_forward
+      value: "1"
+    - name: net.ipv4.conf.{{ kvm_host_network_interface }}.proxy_arp
+      value: "1"
+    - name: net.ipv4.conf.{{ kvm_host_bridge_name }}.proxy_arp
+      value: "1"
+    - name: net.ipv4.conf.all.rp_filter
+      value: "0"
+    - name: net.ipv4.conf.{{ kvm_host_network_interface }}.rp_filter
+      value: "0"
+
+- name: add proxy arp entry for gateway on bridge
+  ansible.builtin.command:
+    cmd: ip neigh replace proxy {{ kvm_host_private_ip }} dev {{ kvm_host_bridge_name }}
+  changed_when: true
 
 - name: create qcow2 disk images
   ansible.builtin.command:
@@ -121,3 +202,29 @@
 - name: display vm domain status
   ansible.builtin.debug:
     msg: "{{ kvm_host_verify.stdout_lines }}"
+
+- name: create iso http server systemd unit
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      Description=ISO HTTP server for Redfish virtual media
+      After=network.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/python3 -m http.server 8888 --directory {{ kvm_host_data_mount }}
+      Restart=on-failure
+
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/iso-http.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: enable and start iso http server
+  ansible.builtin.systemd:
+    name: iso-http
+    daemon_reload: true
+    enabled: true
+    state: started

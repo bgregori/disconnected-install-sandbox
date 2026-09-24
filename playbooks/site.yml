@@ -2,5 +2,22 @@
 - name: Phase 1 — provision AWS infrastructure
   ansible.builtin.import_playbook: phase1_provision.yml
 
+- name: refresh inventory after provisioning
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+
+  tasks:
+    - name: refresh dynamic inventory to discover new instances
+      ansible.builtin.meta: refresh_inventory
+
+    - name: wait for bastion ssh to become available
+      ansible.builtin.wait_for:
+        host: "{{ infra_ec2_bastion_eip }}"
+        port: 22
+        timeout: 300
+      when: infra_ec2_bastion_eip is defined
+
 - name: Phase 2 — configure RHEL 9 services
   ansible.builtin.import_playbook: phase2_configure.yml

@@ -1,10 +1,11 @@
 ---
-- name: install repo tooling
+- name: install repo tooling and bastion utilities
   ansible.builtin.dnf:
     name:
       - httpd
       - createrepo
       - yum-utils
+      - tmux
     state: present
 
 - name: create repo directory

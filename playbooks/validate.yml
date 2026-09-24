@@ -120,11 +120,10 @@
     - name: assert ocp node vms are defined
       ansible.builtin.assert:
         that:
-          - "'ocp-node-0' in validate_virsh_list.stdout"
-          - "'ocp-node-1' in validate_virsh_list.stdout"
-          - "'ocp-node-2' in validate_virsh_list.stdout"
-        fail_msg: "Expected 3 OCP node VMs but got: {{ validate_virsh_list.stdout }}"
-        success_msg: "All 3 OCP node VMs are defined"
+          - "'ocp-node-{{ item }}' in validate_virsh_list.stdout"
+        fail_msg: "VM ocp-node-{{ item }} not found. Got: {{ validate_virsh_list.stdout }}"
+        success_msg: "VM ocp-node-{{ item }} is defined"
+      loop: "{{ range(ocp_node_ips | length) | list }}"
 
     - name: verify sushy-emulator is running
       ansible.builtin.systemd:

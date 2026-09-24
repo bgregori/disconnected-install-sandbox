@@ -53,6 +53,19 @@
           "tag:Project": "{{ project_tag }}"
       register: sandbox_eips
 
+    - name: disassociate elastic ips
+      amazon.aws.ec2_eip:
+        public_ip: "{{ item.public_ip }}"
+        region: "{{ aws_region }}"
+        state: present
+        in_vpc: true
+        release_on_disassociation: true
+      loop: "{{ sandbox_eips.addresses }}"
+      when:
+        - sandbox_eips.addresses | length > 0
+        - item.association_id is defined
+      failed_when: false
+
     - name: release elastic ips
       amazon.aws.ec2_eip:
         public_ip: "{{ item.public_ip }}"
@@ -119,6 +132,28 @@
           ansible.builtin.set_fact:
             teardown_vpc_id: "{{ sandbox_vpcs.vpcs[0].id }}"
 
+        - name: find lingering enis in vpc
+          amazon.aws.ec2_eni_info:
+            region: "{{ aws_region }}"
+            filters:
+              vpc-id: "{{ teardown_vpc_id }}"
+              status: available
+          register: sandbox_enis
+
+        - name: delete lingering enis
+          amazon.aws.ec2_eni:
+            eni_id: "{{ item.id }}"
+            region: "{{ aws_region }}"
+            state: absent
+          loop: "{{ sandbox_enis.network_interfaces }}"
+          when: sandbox_enis.network_interfaces | length > 0
+          failed_when: false
+
+        - name: wait for eni cleanup
+          ansible.builtin.pause:
+            seconds: 15
+          when: sandbox_enis.network_interfaces | length > 0
+
         - name: find sandbox subnets
           amazon.aws.ec2_vpc_subnet_info:
             region: "{{ aws_region }}"
@@ -134,6 +169,10 @@
             region: "{{ aws_region }}"
             state: absent
           loop: "{{ sandbox_subnets.subnets }}"
+          retries: 3
+          delay: 15
+          until: subnet_delete is not failed
+          register: subnet_delete
 
         - name: find and delete non-main route tables
           amazon.aws.ec2_vpc_route_table_info:

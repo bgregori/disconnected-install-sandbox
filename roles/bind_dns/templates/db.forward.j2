@@ -16,3 +16,6 @@ $TTL 86400
 {{ "%-10s" | format(record.name) }} IN  A    {{ record.ip }}
 {% endif %}
 {% endfor %}
+{% for ip in bind_dns_ocp_node_ips %}
+{{ "%-10s" | format('node-' ~ loop.index0) }} IN  A    {{ ip }}
+{% endfor %}

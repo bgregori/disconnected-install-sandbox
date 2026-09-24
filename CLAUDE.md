@@ -154,6 +154,12 @@ rules:
     indent-sequences: true
   comments:
     min-spaces-from-content: 1
+  comments-indentation: false
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
 ```
 
 ## File Layout Quick Reference
@@ -161,14 +167,47 @@ rules:
 ```
 playbooks/           Orchestration playbooks (site, phase1, phase2, teardown, validate)
 roles/infra_*        Phase 1 — AWS resource provisioning (runs on localhost)
+roles/bastion_repo   Phase 2 — Local yum repo on bastion for air-gapped hosts
+roles/rhel_hardening Phase 2 — FIPS 140-3 enablement + DISA STIG application
+roles/bastion_haproxy Phase 2 — HAProxy reverse proxy for OCP API + apps ingress
 roles/bind_dns       Phase 2 — BIND9 DNS server
 roles/chrony_ntp     Phase 2 — Chrony NTP server
-roles/mirror_registry Phase 2 — Podman container registry with self-signed TLS
 roles/common_client  Phase 2 — DNS/NTP client config for all private hosts
+roles/kvm_host       Phase 2 — KVM/libvirt host with OCP node VMs (optional)
+roles/redfish_bmc    Phase 2 — sushy-emulator Redfish BMC (optional)
 roles/ocp_node_prep  Phase 2 — OCP node prerequisites and validation
 inventory/           Dynamic inventory (aws_ec2 plugin) + group_vars
 files/rpms/          Staging directory for offline RPM bundles (gitignored)
 scripts/             Helper scripts (RPM download, pull-secret handling)
+```
+
+## Operational Tips
+
+Long-running operations on the bastion (e.g., `oc mirror`, large downloads) should run
+inside `tmux` so they survive SSH disconnections. `tmux` is installed by the `bastion_repo`
+role.
+
+```bash
+tmux new -s mirror        # start a named session
+# ... run oc mirror ...
+# if disconnected: ssh bastion-sandbox, then:
+tmux attach -t mirror     # resume
+```
+
+Binaries extracted to `/usr/local/bin` on STIG'd hosts need correct ownership and SELinux
+context — the tarball preserves the original UID which won't match:
+
+```bash
+sudo chown root:root /usr/local/bin/<binary>
+sudo chmod 0755 /usr/local/bin/<binary>
+sudo restorecon -v /usr/local/bin/<binary>
+```
+
+If `fapolicyd` is enabled (STIG default), manually placed binaries must also be trusted:
+
+```bash
+sudo fapolicyd-cli --file add /usr/local/bin/<binary>
+sudo fapolicyd-cli --update
 ```
 
 ## Debugging

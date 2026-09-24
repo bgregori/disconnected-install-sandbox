@@ -45,6 +45,70 @@
   failed_when: rhel_hardening_stig_remediation.rc == 1
   changed_when: rhel_hardening_stig_remediation.rc == 2
 
+- name: increase audit backlog limit in stig rules
+  ansible.builtin.lineinfile:
+    path: /etc/audit/rules.d/audit.rules
+    regexp: '^-b\s+'
+    line: "-b {{ rhel_hardening_audit_backlog_limit }}"
+
+- name: remove separate backlog rules file if present
+  ansible.builtin.file:
+    path: /etc/audit/rules.d/99-backlog.rules
+    state: absent
+
+- name: tune auditd configuration for heavy workloads
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - regexp: '^max_log_file\s*='
+      line: "max_log_file = {{ rhel_hardening_audit_max_log_file }}"
+    - regexp: '^num_logs\s*='
+      line: "num_logs = {{ rhel_hardening_audit_num_logs }}"
+    - regexp: '^admin_space_left_action\s*='
+      line: "admin_space_left_action = {{ rhel_hardening_audit_admin_space_left_action }}"
+
+- name: install tmux for long-running operations
+  ansible.builtin.dnf:
+    name: tmux
+    state: present
+
+- name: create tmux config directory
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user | default('ec2-user') }}/.config"
+    state: directory
+    owner: "{{ ansible_user | default('ec2-user') }}"
+    group: "{{ ansible_user | default('ec2-user') }}"
+    mode: "0700"
+
+- name: configure tmux to survive stig shell timeout
+  ansible.builtin.copy:
+    content: |
+      set -g remain-on-exit on
+      bind-key R respawn-pane -k
+    dest: "/home/{{ ansible_user | default('ec2-user') }}/.tmux.conf"
+    owner: "{{ ansible_user | default('ec2-user') }}"
+    group: "{{ ansible_user | default('ec2-user') }}"
+    mode: "0644"
+
+- name: re-open firewall ports after stig remediation
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ rhel_hardening_firewall_ports }}"
+  when: rhel_hardening_firewall_ports | length > 0
+
+- name: enable persistent journal
+  ansible.builtin.file:
+    path: /var/log/journal
+    state: directory
+    owner: root
+    group: systemd-journal
+    mode: "2755"
+
 - name: reboot after stig remediation # noqa: no-handler
   ansible.builtin.reboot:
     reboot_timeout: "{{ rhel_hardening_reboot_timeout }}"
