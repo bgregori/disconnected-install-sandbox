@@ -267,9 +267,9 @@
     - role: rhel_hardening
       rhel_hardening_enable_fips: false
       rhel_hardening_firewall_ports: >-
-        {{ ['8443/tcp'] if 'role_registry' in group_names else [] }}
-        + {{ ['8888/tcp', '8000/tcp'] if 'role_kvm' in group_names else [] }}
-        + {{ ['53/tcp', '53/udp', '123/udp'] if 'role_services' in group_names else [] }}
+        {{ (['8443/tcp'] if 'role_registry' in group_names else [])
+         + (['8888/tcp', '8000/tcp'] if 'role_kvm' in group_names else [])
+         + (['53/tcp', '53/udp', '123/udp'] if 'role_services' in group_names else []) }}
 
 - name: apply stig on bastion
   hosts: role_bastion

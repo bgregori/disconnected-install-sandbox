@@ -10,3 +10,5 @@ kvm_host_bridge_name: virbr1
 kvm_host_private_ip: "{{ kvm_private_ip }}"
 kvm_host_private_cidr: "{{ private_subnet_cidr }}"
 kvm_host_cluster_name: "{{ cluster_name }}"
+kvm_host_api_vip: "{{ api_vip }}"
+kvm_host_ingress_vip: "{{ ingress_vip }}"

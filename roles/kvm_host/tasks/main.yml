@@ -116,7 +116,8 @@
     ip4: "{{ kvm_host_private_ip }}/32"
     method4: manual
     routes4: >-
-      {{ kvm_host_ocp_node_ips | map('regex_replace', '$', '/32') | list }}
+      {{ (kvm_host_ocp_node_ips + [kvm_host_api_vip, kvm_host_ingress_vip])
+         | unique | map('regex_replace', '$', '/32') | list }}
     state: present
   notify: reload networkmanager
 
