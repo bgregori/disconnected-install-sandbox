@@ -124,29 +124,48 @@
 - name: flush handlers to activate bridge
   ansible.builtin.meta: flush_handlers
 
-- name: enable ip forwarding and proxy arp
-  ansible.posix.sysctl:
-    name: "{{ item.name }}"
-    value: "{{ item.value }}"
-    sysctl_set: true
-    reload: true
-    state: present
-  loop:
-    - name: net.ipv4.ip_forward
-      value: "1"
-    - name: net.ipv4.conf.{{ kvm_host_network_interface }}.proxy_arp
-      value: "1"
-    - name: net.ipv4.conf.{{ kvm_host_bridge_name }}.proxy_arp
-      value: "1"
-    - name: net.ipv4.conf.all.rp_filter
-      value: "0"
-    - name: net.ipv4.conf.{{ kvm_host_network_interface }}.rp_filter
-      value: "0"
+- name: write kvm networking sysctl overrides
+  ansible.builtin.copy:
+    content: |
+      net.ipv4.ip_forward = 1
+      net.ipv4.conf.{{ kvm_host_network_interface }}.proxy_arp = 1
+      net.ipv4.conf.{{ kvm_host_bridge_name }}.proxy_arp = 1
+      net.ipv4.conf.all.rp_filter = 0
+      net.ipv4.conf.{{ kvm_host_network_interface }}.rp_filter = 0
+    dest: /etc/sysctl.d/99-kvm-networking.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: apply kvm networking
 
-- name: add proxy arp entry for gateway on bridge
-  ansible.builtin.command:
-    cmd: ip neigh replace proxy {{ kvm_host_private_ip }} dev {{ kvm_host_bridge_name }}
-  changed_when: true
+- name: create kvm networking boot service
+  ansible.builtin.copy:
+    content: |
+      [Unit]
+      Description=Apply KVM bridge networking overrides
+      After=network-online.target libvirtd.service
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/sbin/sysctl -p /etc/sysctl.d/99-kvm-networking.conf
+      ExecStart=/usr/sbin/ip neigh replace proxy {{ kvm_host_private_ip }} dev {{ kvm_host_bridge_name }}
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/kvm-networking.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: apply kvm networking
+
+- name: enable kvm networking boot service
+  ansible.builtin.systemd:
+    name: kvm-networking
+    daemon_reload: true
+    enabled: true
+    state: started
 
 - name: create qcow2 disk images
   ansible.builtin.command:
@@ -160,6 +179,27 @@
     loop_var: idx
 
 - name: check existing vm domains
+  ansible.builtin.command:
+    cmd: "virsh dominfo ocp-node-{{ idx }}"
+  register: kvm_host_domain_check
+  changed_when: false
+  failed_when: false
+  loop: "{{ range(kvm_host_ocp_node_ips | length) | list }}"
+  loop_control:
+    loop_var: idx
+
+- name: restore vm domains from backup xml on data volume
+  ansible.builtin.command:
+    cmd: "virsh define {{ kvm_host_data_mount }}/.domain-xml/ocp-node-{{ idx }}.xml"
+  register: kvm_host_restore_result
+  changed_when: kvm_host_restore_result.rc == 0
+  failed_when: false
+  loop: "{{ range(kvm_host_ocp_node_ips | length) | list }}"
+  loop_control:
+    loop_var: idx
+  when: kvm_host_domain_check.results[idx].rc != 0
+
+- name: recheck vm domains after restore attempt
   ansible.builtin.command:
     cmd: "virsh dominfo ocp-node-{{ idx }}"
   register: kvm_host_domain_check
@@ -193,6 +233,42 @@
   loop_control:
     loop_var: idx
   when: kvm_host_domain_check.results[idx].rc != 0
+
+- name: set vm autostart
+  ansible.builtin.command:
+    cmd: "virsh autostart ocp-node-{{ idx }}"
+  changed_when: false
+  loop: "{{ range(kvm_host_ocp_node_ips | length) | list }}"
+  loop_control:
+    loop_var: idx
+
+- name: create domain xml backup directory on data volume
+  ansible.builtin.file:
+    path: "{{ kvm_host_data_mount }}/.domain-xml"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: dump vm domain xml for backup
+  ansible.builtin.command:
+    cmd: "virsh dumpxml ocp-node-{{ idx }}"
+  register: kvm_host_dumpxml
+  changed_when: false
+  loop: "{{ range(kvm_host_ocp_node_ips | length) | list }}"
+  loop_control:
+    loop_var: idx
+
+- name: save domain xml backup to data volume
+  ansible.builtin.copy:
+    content: "{{ item.stdout }}\n"
+    dest: "{{ kvm_host_data_mount }}/.domain-xml/ocp-node-{{ item.idx }}.xml"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ kvm_host_dumpxml.results }}"
+  loop_control:
+    label: "ocp-node-{{ item.idx }}"
 
 - name: verify vm domains are defined
   ansible.builtin.command:

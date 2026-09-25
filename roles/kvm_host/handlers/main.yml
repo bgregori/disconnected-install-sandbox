@@ -8,3 +8,9 @@
   ansible.builtin.systemd:
     name: NetworkManager
     state: reloaded
+
+- name: apply kvm networking
+  ansible.builtin.systemd:
+    name: kvm-networking
+    daemon_reload: true
+    state: restarted

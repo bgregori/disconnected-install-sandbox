@@ -271,6 +271,16 @@
          + (['8888/tcp', '8000/tcp'] if 'role_kvm' in group_names else [])
          + (['53/tcp', '53/udp', '123/udp'] if 'role_services' in group_names else []) }}
 
+# Step 2.9: Re-apply KVM networking after STIG reboot
+- name: restore kvm networking after stig
+  hosts: role_kvm
+  gather_facts: false
+  tasks:
+    - name: restart kvm networking service
+      ansible.builtin.systemd:
+        name: kvm-networking
+        state: restarted
+
 - name: apply stig on bastion
   hosts: role_bastion
   gather_facts: false
