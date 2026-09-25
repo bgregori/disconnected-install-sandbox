@@ -18,6 +18,13 @@
       <source file='{{ kvm_host_data_mount }}/ocp-node-{{ vm_index }}.qcow2'/>
       <target dev='vda' bus='virtio'/>
     </disk>
+{% if kvm_host_vm_storage_disk | bool %}
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source file='{{ kvm_host_data_mount }}/ocp-node-{{ vm_index }}-storage.qcow2'/>
+      <target dev='vdb' bus='virtio'/>
+    </disk>
+{% endif %}
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
       <target dev='sda' bus='sata'/>

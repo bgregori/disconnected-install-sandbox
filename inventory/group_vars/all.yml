@@ -72,6 +72,8 @@ kvm_data_volume_size: 500
 kvm_vm_vcpu: 16
 kvm_vm_memory_mb: 65536
 kvm_vm_disk_gb: 120
+kvm_vm_storage_disk: true
+kvm_vm_storage_disk_gb: 500
 redfish_port: 8000
 
 # Hardening

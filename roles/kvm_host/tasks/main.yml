@@ -178,6 +178,18 @@
   loop_control:
     loop_var: idx
 
+- name: create qcow2 storage disk images
+  ansible.builtin.command:
+    cmd: >-
+      qemu-img create -f qcow2
+      {{ kvm_host_data_mount }}/ocp-node-{{ idx }}-storage.qcow2
+      {{ kvm_host_vm_storage_disk_gb }}G
+    creates: "{{ kvm_host_data_mount }}/ocp-node-{{ idx }}-storage.qcow2"
+  loop: "{{ range(kvm_host_ocp_node_ips | length) | list }}"
+  loop_control:
+    loop_var: idx
+  when: kvm_host_vm_storage_disk | bool
+
 - name: check existing vm domains
   ansible.builtin.command:
     cmd: "virsh dominfo ocp-node-{{ idx }}"
