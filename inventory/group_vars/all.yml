@@ -69,8 +69,8 @@ kvm_private_ip: "10.0.2.30"
 kvm_instance_type: m5.metal
 kvm_root_volume_size: 200
 kvm_data_volume_size: 500
-kvm_vm_vcpu: 16
-kvm_vm_memory_mb: 65536
+kvm_vm_vcpu: 32
+kvm_vm_memory_mb: 131072
 kvm_vm_disk_gb: 120
 kvm_vm_storage_disk: true
 kvm_vm_storage_disk_gb: 500
