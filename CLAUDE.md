@@ -15,7 +15,7 @@ execution workflow, and variable hierarchy.
 ## Prerequisites
 
 - Ansible >= 2.15 with Python >= 3.9
-- Collections: `amazon.aws >= 7.0.0`, `community.crypto >= 2.0.0`
+- Collections: `amazon.aws >= 9.0.0`, `ansible.posix >= 1.6.0`, `community.crypto >= 2.0.0`, `community.general >= 8.0.0`
 - boto3 >= 1.28.0 (required by amazon.aws)
 - AWS account with VPC/EC2/Route53/SG permissions + a Route53 hosted zone
 
@@ -92,7 +92,7 @@ yamllint .
 - Every role must have `defaults/main.yml` with all configurable variables and sane defaults.
 - Every role must have `meta/main.yml` with `dependencies`, `min_ansible_version`, and `platforms`.
 - Handlers must be in `handlers/main.yml`, not inline in tasks.
-- Keep `tasks/main.yml` as an include dispatcher; put logic in sub-task files.
+- Keep `tasks/main.yml` focused; use `include_tasks` to break up large task files when they exceed ~150 lines.
 - Templates use `.j2` extension. No logic heavier than conditionals and loops in templates.
 
 ### YAML Style
@@ -165,20 +165,25 @@ rules:
 ## File Layout Quick Reference
 
 ```
-playbooks/           Orchestration playbooks (site, phase1, phase2, teardown, validate)
-roles/infra_*        Phase 1 — AWS resource provisioning (runs on localhost)
-roles/bastion_repo   Phase 2 — Local yum repo on bastion for air-gapped hosts
-roles/rhel_hardening Phase 2 — FIPS 140-3 enablement + DISA STIG application
-roles/bastion_haproxy Phase 2 — HAProxy reverse proxy for OCP API + apps ingress
-roles/bind_dns       Phase 2 — BIND9 DNS server
-roles/chrony_ntp     Phase 2 — Chrony NTP server
-roles/common_client  Phase 2 — DNS/NTP client config for all private hosts
-roles/kvm_host       Phase 2 — KVM/libvirt host with OCP node VMs (optional)
-roles/redfish_bmc    Phase 2 — sushy-emulator Redfish BMC (optional)
-roles/ocp_node_prep  Phase 2 — OCP node prerequisites and validation
-inventory/           Dynamic inventory (aws_ec2 plugin) + group_vars
-files/rpms/          Staging directory for offline RPM bundles (gitignored)
-scripts/             Helper scripts (RPM download, pull-secret handling)
+playbooks/                  Orchestration playbooks (site, phase1, phase2, teardown, validate)
+roles/infra_vpc             Phase 1 — VPC, subnets, internet gateway, route tables
+roles/infra_security_groups Phase 1 — Security groups for bastion, services, registry, KVM
+roles/infra_ec2             Phase 1 — EC2 instances, SSH key pair generation and import
+roles/infra_route53         Phase 1 — Route53 DNS records
+roles/infra_ssh_config      Phase 1 — Local SSH client configuration (~/.ssh/config.d)
+roles/bastion_repo          Phase 2 — Local yum repo on bastion for air-gapped hosts
+roles/rhel_hardening        Phase 2 — FIPS 140-3 enablement + DISA STIG application
+roles/bastion_haproxy       Phase 2 — HAProxy reverse proxy for OCP API + apps ingress
+roles/bind_dns              Phase 2 — BIND9 DNS server
+roles/chrony_ntp            Phase 2 — Chrony NTP server
+roles/common_client         Phase 2 — DNS/NTP client config for all private hosts
+roles/kvm_host              Phase 2 — KVM/libvirt host with OCP node VMs (optional)
+roles/redfish_bmc           Phase 2 — sushy-emulator Redfish BMC (optional)
+roles/ocp_node_prep         Phase 2 — OCP node prerequisites and validation
+inventory/                  Dynamic inventory (aws_ec2 plugin) + group_vars
+files/rpms/                 Staging directory for offline RPM bundles (gitignored)
+scripts/                    Helper scripts (RPM download, pull-secret handling)
+docs/                       Agent-based installer guide and operational procedures
 ```
 
 ## Operational Tips

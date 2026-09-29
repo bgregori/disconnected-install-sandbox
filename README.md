@@ -9,14 +9,14 @@ Ansible playbooks that provision an isolated AWS sandbox simulating a **disconne
                  │              VPC 10.0.0.0/16                        │
   INTERNET       │                                                      │
   ──────► IGW ───┤  Public Subnet 10.0.1.0/24                          │
-  :443/:6443     │    bastion (t3.medium) + HAProxy + EIP               │
+  :443/:6443     │    bastion (t3.xlarge) + HAProxy + EIP                │
                  │      │                                               │
                  │  ────│── Private Subnet 10.0.2.0/24 ──────────────  │
                  │      │                                               │
-                 │      ├── services (t3.medium)                        │
+                 │      ├── services (t3.medium, 50 GiB)                        │
                  │      │     BIND9 DNS + Chrony NTP                    │
                  │      │                                               │
-                 │      ├── registry (t3.large + 200 GiB)               │
+                 │      ├── registry (t3.large + 500 GiB)               │
                  │      │     provisioned, not configured                │
                  │      │                                               │
                  │      └── kvm (m5.metal + 500 GiB) [optional]         │
@@ -33,7 +33,7 @@ Ansible playbooks that provision an isolated AWS sandbox simulating a **disconne
 
 **3-4 hosts** across 2 subnets (4 when KVM is enabled), with split-horizon DNS (Route53 external, BIND9 internal), HAProxy L4 TCP passthrough for API/console ingress, FIPS 140-3 enabled, and DISA STIG applied on all hosts.
 
-**KVM bare metal simulation (optional, default: enabled):** An m5.metal EC2 instance runs libvirt/KVM with 3 OCP node VMs using macvtap networking — VMs appear as real hosts on the private subnet. sushy-emulator provides a Redfish BMC API, enabling the **OpenShift Agent-Based Installer (ABI)** — the standard method for disconnected bare metal deployments. Toggle with `enable_kvm_host: false` to skip (environment works the same as before, with OCP nodes deferred to the IPI installer).
+**KVM bare metal simulation (optional, default: enabled):** An m5.metal EC2 instance runs libvirt/KVM with 3 OCP node VMs (32 vCPU, 128 GiB RAM, 120 GiB boot + 500 GiB storage disk each) using bridge networking with proxy ARP — VMs appear as real hosts on the private subnet. sushy-emulator provides a Redfish BMC API, enabling the **OpenShift Agent-Based Installer (ABI)** — the standard method for disconnected bare metal deployments. Toggle with `enable_kvm_host: false` to skip (environment works the same as before, with OCP nodes deferred to the IPI installer).
 
 The **registry host** is provisioned as infrastructure only — registry software setup using Red Hat's `mirror-registry` binary and `oc mirror v2` is handled by a separate project.
 
@@ -41,6 +41,7 @@ The **registry host** is provisioned as infrastructure only — registry softwar
 
 - Ansible >= 2.15 with Python >= 3.9
 - boto3 >= 1.28.0
+- Collections: `amazon.aws >= 9.0.0`, `community.crypto >= 2.0.0`, `ansible.posix >= 1.6.0`, `community.general >= 8.0.0`
 - An AWS account with permissions to create VPC, EC2, Route53, and security group resources
 - A Route53 hosted zone for your domain (the playbooks create A records in an existing zone)
 
@@ -143,7 +144,7 @@ Runs on remote hosts via SSH through the bastion ProxyCommand tunnel:
 5. **Chrony NTP** — local stratum 10 server (no upstream — air-gapped)
 6. **DNS/NTP clients** — all private hosts pointed at services host
 7. **HAProxy** — L4 TCP passthrough on bastion for OCP API (:6443) and apps (:443/:80), routes to keepalived VIPs
-8. **KVM host** (when enabled) — libvirt/KVM with 3 OCP node VMs using macvtap networking
+8. **KVM host** (when enabled) — libvirt/KVM with 3 OCP node VMs using bridge networking with proxy ARP
 9. **Redfish BMC** (when enabled) — sushy-emulator for Redfish API access to VMs
 10. **DISA STIG** — OpenSCAP remediation on private hosts first, then bastion
 
@@ -194,24 +195,29 @@ Two DNS views serve the same names with different targets:
 | `api-int.ocp.*` | not published | API VIP `10.0.2.103` (keepalived) |
 | `*.apps.ocp.*` | Bastion EIP (HAProxy) | Ingress VIP `10.0.2.104` (keepalived) |
 
-Both external and internal traffic routes through the VIPs. External clients (browser, `oc` CLI) hit Route53 -> bastion EIP -> HAProxy -> VIPs. Internal clients (OCP nodes, pods) resolve via BIND9 -> VIPs directly. OpenShift's keepalived manages the VIPs across control plane nodes for HA failover. The VIPs (`api_vip`, `ingress_vip`) are registered as secondary IPs on the KVM host ENI so AWS routes the traffic correctly.
+Both external and internal traffic routes through the VIPs. External clients (browser, `oc` CLI) hit Route53 -> bastion EIP -> HAProxy -> VIPs. Internal clients (OCP nodes, pods) resolve via BIND9 -> VIPs directly. OpenShift's keepalived manages the VIPs across control plane nodes for HA failover. The KVM host bridge uses proxy ARP and /32 routes so AWS routes traffic to the VIPs correctly.
 
 ## Project Structure
 
 ```
-playbooks/           Orchestration playbooks (site, phase1, phase2, teardown, validate)
-roles/infra_*        Phase 1 — AWS resource provisioning (runs on localhost)
-roles/bind_dns       Phase 2 — BIND9 DNS server
-roles/chrony_ntp     Phase 2 — Chrony NTP server
-roles/bastion_repo   Phase 2 — Local yum repo on bastion
-roles/bastion_haproxy Phase 2 — HAProxy reverse proxy
-roles/kvm_host       Phase 2 — KVM/libvirt host with OCP node VMs (optional)
-roles/redfish_bmc    Phase 2 — sushy-emulator Redfish BMC (optional)
-roles/rhel_hardening Phase 2 — FIPS 140-3 + DISA STIG
-roles/common_client  Phase 2 — DNS/NTP client config for all private hosts
-roles/ocp_node_prep  Validation — OCP node prerequisites (DNS, NTP, FIPS checks)
-inventory/           Dynamic inventory (aws_ec2 plugin) + group_vars
-scripts/             Helper scripts (RPM download)
+playbooks/             Orchestration playbooks (site, phase1, phase2, teardown, validate)
+roles/infra_vpc        Phase 1 — VPC, subnets, IGW, route tables
+roles/infra_security_groups  Phase 1 — Security groups with strict isolation rules
+roles/infra_ec2        Phase 1 — EC2 instances, SSH key pair (locally generated)
+roles/infra_route53    Phase 1 — Route53 DNS records
+roles/infra_ssh_config Phase 1 — Local SSH config with ProxyCommand
+roles/bastion_repo     Phase 2 — Local yum repo on bastion
+roles/bind_dns         Phase 2 — BIND9 DNS server
+roles/chrony_ntp       Phase 2 — Chrony NTP server
+roles/common_client    Phase 2 — DNS/NTP client config for all private hosts
+roles/bastion_haproxy  Phase 2 — HAProxy reverse proxy
+roles/kvm_host         Phase 2 — KVM/libvirt host with OCP node VMs (optional)
+roles/redfish_bmc      Phase 2 — sushy-emulator Redfish BMC (optional)
+roles/rhel_hardening   Phase 2 — FIPS 140-3 + DISA STIG
+roles/ocp_node_prep    Validation — OCP node prerequisites (DNS, NTP, FIPS checks)
+inventory/             Dynamic inventory (aws_ec2 plugin) + group_vars
+docs/                  Operational guides (agent-based-install)
+scripts/               Helper scripts (RPM download)
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full blueprint: AWS resource mapping, security group matrix, execution workflow, and variable hierarchy.
