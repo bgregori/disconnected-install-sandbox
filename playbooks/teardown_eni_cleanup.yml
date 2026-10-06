@@ -1,0 +1,41 @@
+---
+- name: query enis in vpc
+  amazon.aws.ec2_eni_info:
+    region: "{{ teardown_eni_region }}"
+    filters:
+      vpc-id: "{{ teardown_eni_vpc_id }}"
+  register: teardown_eni_list
+
+- name: detach in-use enis
+  amazon.aws.ec2_eni:
+    eni_id: "{{ item.id }}"
+    region: "{{ teardown_eni_region }}"
+    attached: false
+    force_detach: true
+  loop: "{{ teardown_eni_list.network_interfaces | selectattr('status', 'equalto', 'in-use') | list }}"
+  loop_control:
+    label: "{{ item.id }}"
+  failed_when: false
+
+- name: wait for eni detachment
+  ansible.builtin.pause:
+    seconds: 45
+  when: teardown_eni_list.network_interfaces | selectattr('status', 'equalto', 'in-use') | list | length > 0
+
+- name: re-query enis after detach wait
+  amazon.aws.ec2_eni_info:
+    region: "{{ teardown_eni_region }}"
+    filters:
+      vpc-id: "{{ teardown_eni_vpc_id }}"
+  register: teardown_eni_list
+
+- name: delete enis in vpc
+  amazon.aws.ec2_eni:
+    eni_id: "{{ item.id }}"
+    region: "{{ teardown_eni_region }}"
+    state: absent
+  loop: "{{ teardown_eni_list.network_interfaces }}"
+  loop_control:
+    label: "{{ item.id }}"
+  when: teardown_eni_list.network_interfaces | length > 0
+  failed_when: false
