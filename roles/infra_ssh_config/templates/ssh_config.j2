@@ -2,6 +2,7 @@ Host bastion-sandbox
     HostName {{ infra_ec2_bastion_eip }}
     User {{ infra_ssh_config_user }}
     IdentityFile {{ infra_ssh_config_key_path }}
+    UserKnownHostsFile {{ infra_ssh_config_known_hosts }}
     StrictHostKeyChecking accept-new
 
 Host services-sandbox
@@ -9,6 +10,7 @@ Host services-sandbox
     User {{ infra_ssh_config_user }}
     IdentityFile {{ infra_ssh_config_key_path }}
     ProxyCommand ssh -W %h:%p bastion-sandbox
+    UserKnownHostsFile {{ infra_ssh_config_known_hosts }}
     StrictHostKeyChecking accept-new
 
 Host registry-sandbox
@@ -16,6 +18,7 @@ Host registry-sandbox
     User {{ infra_ssh_config_user }}
     IdentityFile {{ infra_ssh_config_key_path }}
     ProxyCommand ssh -W %h:%p bastion-sandbox
+    UserKnownHostsFile {{ infra_ssh_config_known_hosts }}
     StrictHostKeyChecking accept-new
 
 {% if enable_kvm_host | default(true) %}
@@ -24,6 +27,7 @@ Host kvm-sandbox
     User {{ infra_ssh_config_user }}
     IdentityFile {{ infra_ssh_config_key_path }}
     ProxyCommand ssh -W %h:%p bastion-sandbox
+    UserKnownHostsFile {{ infra_ssh_config_known_hosts }}
     StrictHostKeyChecking accept-new
 
 {% endif %}
@@ -33,6 +37,7 @@ Host {{ node.name }}-sandbox
     User {{ infra_ssh_config_user }}
     IdentityFile {{ infra_ssh_config_key_path }}
     ProxyCommand ssh -W %h:%p bastion-sandbox
+    UserKnownHostsFile {{ infra_ssh_config_known_hosts }}
     StrictHostKeyChecking accept-new
 
 {% endfor %}

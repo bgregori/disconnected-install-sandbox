@@ -3,3 +3,6 @@ infra_ssh_config_key_path: "{{ ssh_key_path }}"
 infra_ssh_config_user: ec2-user
 infra_ssh_config_dir: "~/.ssh"
 infra_ssh_config_file: "~/.ssh/config.d/disconnected-sandbox"
+# Sandbox hosts reuse static private IPs across reprovisions, so their host keys
+# change every time. Keep them out of the operator's real known_hosts.
+infra_ssh_config_known_hosts: "~/.ssh/known_hosts.disconnected-sandbox"

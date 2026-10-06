@@ -227,6 +227,11 @@
         path: "~/.ssh/config.d/disconnected-sandbox"
         state: absent
 
+    - name: remove sandbox known_hosts
+      ansible.builtin.file:
+        path: "~/.ssh/known_hosts.disconnected-sandbox"
+        state: absent
+
     - name: teardown complete
       ansible.builtin.debug:
         msg: "All disconnected-sandbox resources destroyed in {{ aws_region }}"
