@@ -1,7 +1,7 @@
 <domain type='kvm'>
-  <name>ocp-node-{{ vm_index }}</name>
-  <memory unit='MiB'>{{ kvm_host_vm_memory_mb }}</memory>
-  <vcpu placement='static'>{{ kvm_host_vm_vcpu }}</vcpu>
+  <name>{{ vm.name }}</name>
+  <memory unit='MiB'>{{ vm.memory_mb }}</memory>
+  <vcpu placement='static'>{{ vm.vcpu }}</vcpu>
   <os>
     <type arch='x86_64' machine='pc-q35-rhel9.4.0'>hvm</type>
     <boot dev='hd'/>
@@ -15,13 +15,13 @@
   <devices>
     <disk type='file' device='disk'>
       <driver name='qemu' type='qcow2'/>
-      <source file='{{ kvm_host_data_mount }}/ocp-node-{{ vm_index }}.qcow2'/>
+      <source file='{{ kvm_host_data_mount }}/{{ vm.name }}.qcow2'/>
       <target dev='vda' bus='virtio'/>
     </disk>
-{% if kvm_host_vm_storage_disk | bool %}
+{% if vm.storage_disk | bool %}
     <disk type='file' device='disk'>
       <driver name='qemu' type='qcow2'/>
-      <source file='{{ kvm_host_data_mount }}/ocp-node-{{ vm_index }}-storage.qcow2'/>
+      <source file='{{ kvm_host_data_mount }}/{{ vm.name }}-storage.qcow2'/>
       <target dev='vdb' bus='virtio'/>
     </disk>
 {% endif %}

@@ -19,6 +19,47 @@
           -e sandbox_domain=example.com
           -e admin_cidr=$(curl -s ifconfig.me)/32
 
+    - name: validate topology name
+      ansible.builtin.assert:
+        that:
+          - ocp_topology in ocp_topology_presets
+        fail_msg: >-
+          Unknown ocp_topology '{{ ocp_topology }}'. Choose one of
+          {{ ocp_topology_presets.keys() | list | join(', ') }}.
+        quiet: true
+
+    - name: validate cluster topology
+      ansible.builtin.assert:
+        that:
+          - (ocp_master_count | int) in [1, 3, 5]
+          - (ocp_master_count | int) == 1 or (ocp_worker_count | int) != 1
+        fail_msg: >-
+          Invalid node counts for topology '{{ ocp_topology }}': the control
+          plane must have 1, 3, or 5 members (got {{ ocp_master_count }}) and a
+          multi-node cluster needs either 0 or 2+ workers
+          (got {{ ocp_worker_count }}).
+        success_msg: >-
+          Topology '{{ ocp_topology }}': {{ ocp_master_count }} master(s),
+          {{ ocp_worker_count }} worker(s) on {{ ocp_node_ips | join(', ') }}
+
+    - name: validate kvm data volume fits the topology
+      ansible.builtin.assert:
+        that:
+          - (kvm_data_volume_size | int) >= ocp_topology_required_disk_gb | int
+        fail_msg: >-
+          kvm_data_volume_size is {{ kvm_data_volume_size }} GB but topology
+          '{{ ocp_topology }}' needs at least
+          {{ ocp_topology_required_disk_gb }} GB of VM disk images.
+        success_msg: >-
+          Data volume {{ kvm_data_volume_size }} GB covers
+          {{ ocp_topology_required_disk_gb }} GB of VM disks
+      vars:
+        ocp_topology_required_disk_gb: >-
+          {{ (ocp_nodes | map(attribute='disk_gb') | map('int') | sum)
+             + (ocp_nodes | selectattr('storage_disk')
+                | map(attribute='storage_disk_gb') | map('int') | sum) }}
+      when: enable_kvm_host | bool
+
     - name: validate aws credentials are available
       amazon.aws.aws_caller_info:
         region: "{{ aws_region }}"
@@ -43,6 +84,11 @@
           - "VPC: {{ vpc_id }}"
           - "Bastion EIP: {{ infra_ec2_bastion_eip }}"
           - "Domain: {{ cluster_domain }}"
+          - "Topology: {{ ocp_topology }} ({{ ocp_master_count }} master,
+             {{ ocp_worker_count }} worker)"
+          - "Nodes: {{ ocp_nodes | map(attribute='hostname') | zip(ocp_node_ips)
+             | map('join', '=') | join(', ') }}"
+          - "VIPs: api {{ api_vip }}, ingress {{ ingress_vip }}"
           - ""
           - "SSH config: {{ infra_ssh_config_file | default('~/.ssh/config.d/disconnected-sandbox') }}"
           - "Test bastion: ssh bastion-sandbox hostname"

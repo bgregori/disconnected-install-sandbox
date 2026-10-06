@@ -11,8 +11,8 @@ from it using Redfish virtual media.
 - DNS records for `api.ocp.<domain>`, `api-int.ocp.<domain>`, and
   `*.apps.ocp.<domain>` resolve correctly
 - The KVM host VMs are defined but not running (`virsh list --all` shows them as `shut off`)
-- Each VM has a 500 GiB secondary disk (`vdb`) for LVM Storage when
-  `kvm_vm_storage_disk` is true (the default)
+- Each VM has a secondary disk (`vdb`) for LVM Storage when the selected
+  topology enables one (`sno` and `compact` do; `standard` does not)
 
 ## 1. Prepare installer configs on the registry host
 
@@ -43,9 +43,12 @@ networking:
 compute:
   - name: worker
     replicas: 0
+compute:
+  - name: worker
+    replicas: 0        # 3 when ocp_topology=standard
 controlPlane:
   name: master
-  replicas: 3          # 3 for compact, 1 for SNO
+  replicas: 3          # match ocp_master_count: 3 for compact/standard, 1 for sno
 platform:
   none: {}
 pullSecret: '<pull-secret-json>'
@@ -67,9 +70,17 @@ imageDigestSources:
 
 ### agent-config.yaml
 
-The example below shows a single host entry. For multi-node clusters
-(`ocp_node_count=3`, the default), repeat the `hosts` block for each node
-with its own hostname, MAC address, and IP (10.0.2.100, 10.0.2.101, 10.0.2.102).
+The example below shows a single host entry. Add one `hosts` entry per node in
+the selected topology, each with its own hostname, MAC address, and IP. The
+hostnames and IPs match what Phase 1 printed and what BIND9 serves:
+
+| `ocp_topology` | Hosts |
+|---|---|
+| `sno` | `master-0` (10.0.2.100) |
+| `compact` | `master-0..2` (10.0.2.100-102) |
+| `standard` | `master-0..2` (10.0.2.100-102), `worker-0..2` (10.0.2.103-105) |
+
+`rendezvousIP` must be the first master, 10.0.2.100.
 
 ```yaml
 apiVersion: v1alpha1
@@ -77,7 +88,7 @@ metadata:
   name: ocp
 rendezvousIP: 10.0.2.100
 hosts:
-  - hostname: node-0
+  - hostname: master-0
     role: master
     interfaces:
       - name: enp1s0
@@ -102,7 +113,8 @@ hosts:
           - destination: 0.0.0.0/0
             next-hop-address: 10.0.2.30
             next-hop-interface: enp1s0
-  # For multi-node: add node-1 (10.0.2.101), node-2 (10.0.2.102), etc.
+  # Add the remaining masters and any workers the same way, changing
+  # hostname, role, macAddress, and the ipv4 address.
 ```
 
 > **Important:** The `next-hop-address` must be `10.0.2.30` (the KVM host bridge IP),
@@ -116,12 +128,13 @@ Retrieve them before writing agent-config.yaml:
 
 ```bash
 # On the KVM host
-sudo virsh domiflist ocp-node-0
+sudo virsh domiflist ocp-master-0
 # Output: vnet0  bridge  virbr1  virtio  52:54:00:9e:b0:15
 ```
 
-For multi-node clusters, repeat for each VM (`ocp-node-0`, `ocp-node-1`, etc.) and
-add a `hosts` entry per node with the corresponding MAC, IP, and hostname.
+Repeat for every VM (`virsh list --all --name` lists them) and add a `hosts` entry
+per node with the corresponding MAC, IP, and hostname. The libvirt domain
+`ocp-master-0` corresponds to agent-config hostname `master-0`.
 
 ## 2. Generate the agent ISO
 
@@ -188,7 +201,7 @@ For multi-node clusters, repeat for each VM UUID.
 The VMs have VNC enabled on auto-assigned ports. From the KVM host:
 
 ```bash
-sudo virsh vncdisplay ocp-node-0
+sudo virsh vncdisplay ocp-master-0
 # Output: 127.0.0.1:0
 ```
 
@@ -239,7 +252,7 @@ from the ISO again:
 
 ```bash
 # On the KVM host
-sudo virsh change-media ocp-node-0 sda --eject
+sudo virsh change-media ocp-master-0 sda --eject
 ```
 
 For multi-node, repeat for each VM.
@@ -248,8 +261,8 @@ If the VM has already rebooted into the ISO instead of the installed OS, eject a
 reboot:
 
 ```bash
-sudo virsh change-media ocp-node-0 sda --eject
-sudo virsh reboot ocp-node-0
+sudo virsh change-media ocp-master-0 sda --eject
+sudo virsh reboot ocp-master-0
 ```
 
 ## 7. Verify the cluster

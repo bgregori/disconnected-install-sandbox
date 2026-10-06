@@ -29,15 +29,123 @@ bastion_private_ip: "10.0.1.10"
 services_private_ip: "10.0.2.10"
 registry_private_ip: "10.0.2.20"
 
-# OpenShift node count — set to 1 for SNO, 3 for compact, or higher for larger clusters
-ocp_node_count: 3
+# OpenShift cluster topology
+# ---------------------------------------------------------------------------
+# Pick a topology and everything else is derived from it: node count, node IPs,
+# VIPs, DNS records, per-VM sizing, and the KVM host data volume size.
+#
+#   sno       1 schedulable master, sized for an OpenShift Virtualization POC
+#   compact   3 schedulable masters, no dedicated workers
+#   standard  3 masters + 3 workers
+#
+# Select at runtime with -e ocp_topology=standard
+#
+# Every derived value stays individually overridable, so you only set what you
+# actually want to change:
+#   -e ocp_worker_count=5 -e ocp_worker_memory_mb=65536 -e kvm_data_volume_size=2000
+#
+# All presets fit an m5.metal host (96 vCPU / 384 GiB) with headroom for the
+# hypervisor. data_volume_size covers every VM disk plus room for agent ISOs.
+ocp_topology: compact
+
+ocp_topology_presets:
+  sno:
+    masters: 1
+    workers: 0
+    data_volume_size: 750
+    master:
+      vcpu: 32
+      memory_mb: 131072
+      disk_gb: 120
+      storage_disk: true
+      storage_disk_gb: 500
+    worker:
+      vcpu: 8
+      memory_mb: 32768
+      disk_gb: 120
+      storage_disk: false
+      storage_disk_gb: 0
+  compact:
+    masters: 3
+    workers: 0
+    data_volume_size: 1000
+    master:
+      vcpu: 16
+      memory_mb: 49152
+      disk_gb: 120
+      storage_disk: true
+      storage_disk_gb: 150
+    worker:
+      vcpu: 8
+      memory_mb: 32768
+      disk_gb: 120
+      storage_disk: false
+      storage_disk_gb: 0
+  standard:
+    masters: 3
+    workers: 3
+    data_volume_size: 900
+    master:
+      vcpu: 8
+      memory_mb: 24576
+      disk_gb: 120
+      storage_disk: false
+      storage_disk_gb: 0
+    worker:
+      vcpu: 8
+      memory_mb: 32768
+      disk_gb: 120
+      storage_disk: false
+      storage_disk_gb: 0
+
+ocp_topology_spec: "{{ ocp_topology_presets[ocp_topology] }}"
+
+ocp_master_count: "{{ ocp_topology_spec.masters }}"
+ocp_worker_count: "{{ ocp_topology_spec.workers }}"
+ocp_node_count: "{{ (ocp_master_count | int) + (ocp_worker_count | int) }}"
 ocp_node_ip_start: 100
-ocp_node_ips: >-
-  {{ range(ocp_node_ip_start | int,
-           (ocp_node_ip_start | int) + (ocp_node_count | int))
-     | map('string')
-     | map('regex_replace', '^', '10.0.2.')
-     | list }}
+
+ocp_master_vcpu: "{{ ocp_topology_spec.master.vcpu }}"
+ocp_master_memory_mb: "{{ ocp_topology_spec.master.memory_mb }}"
+ocp_master_disk_gb: "{{ ocp_topology_spec.master.disk_gb }}"
+ocp_master_storage_disk: "{{ ocp_topology_spec.master.storage_disk }}"
+ocp_master_storage_disk_gb: "{{ ocp_topology_spec.master.storage_disk_gb }}"
+
+ocp_worker_vcpu: "{{ ocp_topology_spec.worker.vcpu }}"
+ocp_worker_memory_mb: "{{ ocp_topology_spec.worker.memory_mb }}"
+ocp_worker_disk_gb: "{{ ocp_topology_spec.worker.disk_gb }}"
+ocp_worker_storage_disk: "{{ ocp_topology_spec.worker.storage_disk }}"
+ocp_worker_storage_disk_gb: "{{ ocp_topology_spec.worker.storage_disk_gb }}"
+
+# Node inventory - masters first, then workers, on sequential IPs from
+# ocp_node_ip_start. Single source of truth for libvirt domains, DNS records,
+# SSH config entries, and the secondary IPs assigned to the KVM host ENI.
+ocp_nodes: "{{ (ocp_nodes_yaml | from_yaml) or [] }}"
+ocp_nodes_yaml: |
+  {% for i in range(ocp_master_count | int) %}
+  - name: {{ cluster_name }}-master-{{ i }}
+    hostname: master-{{ i }}
+    role: master
+    ip: 10.0.2.{{ (ocp_node_ip_start | int) + i }}
+    vcpu: {{ ocp_master_vcpu | int }}
+    memory_mb: {{ ocp_master_memory_mb | int }}
+    disk_gb: {{ ocp_master_disk_gb | int }}
+    storage_disk: {{ ocp_master_storage_disk | bool | ternary('true', 'false') }}
+    storage_disk_gb: {{ ocp_master_storage_disk_gb | int }}
+  {% endfor %}
+  {% for i in range(ocp_worker_count | int) %}
+  - name: {{ cluster_name }}-worker-{{ i }}
+    hostname: worker-{{ i }}
+    role: worker
+    ip: 10.0.2.{{ (ocp_node_ip_start | int) + (ocp_master_count | int) + i }}
+    vcpu: {{ ocp_worker_vcpu | int }}
+    memory_mb: {{ ocp_worker_memory_mb | int }}
+    disk_gb: {{ ocp_worker_disk_gb | int }}
+    storage_disk: {{ ocp_worker_storage_disk | bool | ternary('true', 'false') }}
+    storage_disk_gb: {{ ocp_worker_storage_disk_gb | int }}
+  {% endfor %}
+
+ocp_node_ips: "{{ ocp_nodes | map(attribute='ip') | list }}"
 
 # OpenShift VIPs — keepalived manages these on multi-node clusters.
 # For SNO (ocp_node_count=1), VIPs collapse to the single node's IP.
@@ -68,12 +176,11 @@ enable_kvm_host: true
 kvm_private_ip: "10.0.2.30"
 kvm_instance_type: m5.metal
 kvm_root_volume_size: 200
-kvm_data_volume_size: 500
-kvm_vm_vcpu: 32
-kvm_vm_memory_mb: 131072
-kvm_vm_disk_gb: 120
-kvm_vm_storage_disk: true
-kvm_vm_storage_disk_gb: 500
+# Sized for the selected topology - override with -e kvm_data_volume_size=<gb>
+kvm_data_volume_size: "{{ ocp_topology_spec.data_volume_size }}"
+# Host resources held back from the VMs (hypervisor, libvirt, agent ISOs)
+kvm_reserved_vcpu: 8
+kvm_reserved_memory_mb: 16384
 redfish_port: 8000
 
 # Hardening

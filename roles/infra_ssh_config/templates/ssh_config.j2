@@ -27,9 +27,9 @@ Host kvm-sandbox
     StrictHostKeyChecking accept-new
 
 {% endif %}
-{% for ip in ocp_node_ips %}
-Host ocp-node-{{ loop.index0 }}-sandbox
-    HostName {{ ip }}
+{% for node in ocp_nodes %}
+Host {{ node.name }}-sandbox
+    HostName {{ node.ip }}
     User {{ infra_ssh_config_user }}
     IdentityFile {{ infra_ssh_config_key_path }}
     ProxyCommand ssh -W %h:%p bastion-sandbox

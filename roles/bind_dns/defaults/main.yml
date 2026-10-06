@@ -22,4 +22,4 @@ bind_dns_records:
   - name: kvm
     ip: "{{ kvm_private_ip }}"
 
-bind_dns_ocp_node_ips: "{{ ocp_node_ips }}"
+bind_dns_ocp_nodes: "{{ ocp_nodes }}"

@@ -239,10 +239,10 @@ on the bastion L4-forwards to the keepalived VIPs on the private subnet.
 | bastion            | Public  | t3.xlarge     | 10.0.1.10      | sg-bastion               | 500 GiB  | —              |
 | services           | Private | t3.medium     | 10.0.2.10      | sg-services              | 50 GiB   | —              |
 | registry           | Private | t3.large      | 10.0.2.20      | sg-registry              | 50 GiB   | 500 GiB (images)|
-| kvm (optional)     | Private | m5.metal      | 10.0.2.30      | sg-kvm-host + sg-ocp-nodes | 200 GiB  | 500 GiB (VM images) |
+| kvm (optional)     | Private | m5.metal      | 10.0.2.30      | sg-kvm-host + sg-ocp-nodes | 200 GiB  | per topology (VM images) |
 
 **KVM host** (when `enable_kvm_host: true`, default): An m5.metal bare metal instance running
-libvirt/KVM with `ocp_node_count` OCP node VMs (default 3) using a Linux bridge (`virbr1`)
+libvirt/KVM with the OCP node VMs for the selected `ocp_topology` using a Linux bridge (`virbr1`)
 with proxy ARP. OCP node IPs (starting at 10.0.2.100) and VIPs (immediately after the last
 node) are assigned as secondary private IPs on the KVM host's ENI, and source/destination
 check is disabled.
@@ -251,10 +251,14 @@ for VM traffic. sushy-emulator provides a Redfish BMC API on port 8000, enabling
 Installer (ABI) to mount ISOs and power-cycle VMs as if they were real bare metal servers.
 
 **OCP nodes** are simulated as KVM VMs when the KVM host is enabled, or provisioned by the
-OpenShift IPI installer when it is disabled. The number of nodes is controlled by `ocp_node_count`
-(default 3; set to 1 for SNO). IPs are derived starting at `ocp_node_ip_start` (default 100),
-and VIPs are positioned after the last node. All IPs are computed in `all.yml` so DNS records
-and HAProxy backends adapt automatically.
+OpenShift IPI installer when it is disabled. Cluster shape is controlled by a single variable,
+`ocp_topology` (`sno`, `compact` — the default, or `standard`). The preset expands in `all.yml`
+into `ocp_nodes`, the single source of truth for libvirt domains, DNS records, SSH config
+entries, and the secondary IPs on the KVM host ENI. Masters come first, then workers, on
+sequential IPs from `ocp_node_ip_start` (default 100), with VIPs positioned after the last node.
+Per-VM sizing and `kvm_data_volume_size` also come from the preset, and each derived value
+stays individually overridable (`ocp_worker_count`, `ocp_master_vcpu`, …). DNS records, HAProxy
+backends, and VM definitions adapt automatically.
 
 **Registry host note:** The registry host is provisioned as infrastructure only (EC2 instance, security group,
 DNS record, 500 GiB data volume). Registry software configuration is handled by a separate project
@@ -281,9 +285,9 @@ VPC
  │    │    └── sg-registry
  │    └── KVM EC2 (m5.metal, optional)
  │         ├── sg-kvm-host + sg-ocp-nodes (dual SG)
- │         ├── Secondary IPs: ocp_node_ips + VIPs on ENI (derived from ocp_node_count)
+ │         ├── Secondary IPs: ocp_node_ips + VIPs on ENI (derived from ocp_topology)
  │         ├── Source/dest check disabled
- │         └── VMs: ocp-node-{0..N-1} via bridge virbr1 + proxy ARP (N = ocp_node_count)
+ │         └── VMs: ocp-master-{0..M-1}, ocp-worker-{0..W-1} via bridge virbr1 + proxy ARP
  └── Security Groups (all reference VPC ID)
       ├── sg-ocp-nodes (for KVM VMs or IPI installer)
       └── sg-kvm-host (optional, when enable_kvm_host)
@@ -336,7 +340,7 @@ All security groups are **stateful** — return traffic for allowed inbound rule
 | Egress    | UDP      | 123        | `10.0.2.10/32`           | NTP to services host              |
 | Egress    | TCP      | 8080       | `10.0.1.10/32`           | Bastion local yum repo            |
 
-### 3.4 sg-ocp-nodes (OpenShift 4 Cluster — ocp_node_count Nodes)
+### 3.4 sg-ocp-nodes (OpenShift 4 Cluster — all masters and workers)
 
 This security group is pre-created for the IPI installer. No EC2 instances are assigned to it
 by this repo — the installer assigns it to nodes it creates.
@@ -427,7 +431,7 @@ Created when `enable_kvm_host: true`. The KVM host also gets `sg-ocp-nodes` assi
                  │  │                                                  │ │   │
                  │  │  KVM HOST (sg-kvm-host + sg-ocp-nodes) [optional]│ │   │
                  │  │    10.0.2.30 (m5.metal)                        │ │   │
-                 │  │    └── ocp-node-{0..N-1} VMs (bridge+proxy ARP) │ │   │
+                 │  │    └── ocp-{master,worker}-N VMs (bridge+pxy ARP)│ │   │
                  │  │    sushy-emulator :8000 (Redfish BMC) ─────────┘ │   │
                  │  │                                                   │   │
                  │  │  *** NO route to IGW — NO NAT Gateway ***         │   │
@@ -480,7 +484,7 @@ Step 1.3: infra_ec2 role
   ├── Launch services host (private subnet, 10.0.2.10)
   ├── Launch registry host (private subnet, 10.0.2.20, +500GiB EBS)
   ├── (When KVM enabled) Launch KVM host (m5.metal, 10.0.2.30, +500GiB EBS)
-  │     ├── Assign secondary IPs (ocp_node_ips + 2 VIPs, derived from ocp_node_count) on ENI
+  │     ├── Assign secondary IPs (ocp_node_ips + 2 VIPs, derived from ocp_topology) on ENI
   │     └── Disable source/destination check on ENI
   └── Wait for all instances to reach "running" state
 
@@ -578,7 +582,7 @@ Step 2.2: bind_dns role (services host)
   │     ├── registry.ocp.{{ sandbox_domain }} → 10.0.2.20
   │     ├── bastion.ocp.{{ sandbox_domain }}  → 10.0.1.10
   │     ├── kvm.ocp.{{ sandbox_domain }}      → 10.0.2.30
-  │     └── node-{0..N-1}.ocp.{{ sandbox_domain }} → ocp_node_ips (generated from ocp_node_count)
+  │     └── master-{0..M-1}/worker-{0..W-1}.ocp.{{ sandbox_domain }} → ocp_node_ips (from ocp_topology)
   ├── Generate reverse zone: 2.0.10.in-addr.arpa
   ├── Enable and start named.service
   └── VALIDATION: dig @10.0.2.10 api.ocp.{{ sandbox_domain }} (from bastion)
@@ -619,11 +623,12 @@ Step 2.6: kvm_host role (kvm host) — when enable_kvm_host
   ├── Enable and start libvirtd
   ├── Destroy default NAT network (bridge replaces it)
   ├── Create Linux bridge virbr1 with /32 address + per-node routes, enable proxy ARP
-  ├── Create qcow2 disk images (120 GiB each + 500 GiB storage disk each, ocp_node_count VMs)
-  ├── Define VM domains from XML template:
-  │     ├── ocp-node-{0..N-1}: 32 vCPU, 128 GiB RAM each
+  ├── ASSERT: total VM vCPU/RAM fits this host minus kvm_reserved_{vcpu,memory_mb}
+  ├── Create qcow2 disk images (per-node disk_gb, plus storage_disk_gb where enabled)
+  ├── Define VM domains from XML template (one per entry in ocp_nodes):
+  │     ├── ocp-master-{0..M-1}, ocp-worker-{0..W-1}: vCPU/RAM from the topology preset
   │     ├── Network: bridge virbr1 with proxy ARP (VMs on private subnet)
-  │     ├── Disk: vda virtio qcow2 (120 GiB), vdb virtio qcow2 (500 GiB, for LVM Storage)
+  │     ├── Disk: vda virtio qcow2 (boot), vdb virtio qcow2 (storage, for LVM Storage)
   │     ├── CDROM: empty (ISO mounted via Redfish)
   │     └── CPU: host-passthrough
   └── VMs are defined but NOT started (ABI will power them on)
@@ -636,7 +641,7 @@ Step 2.7: redfish_bmc role (kvm host) — when enable_kvm_host
   ├── Deploy systemd unit: sushy-emulator.service
   ├── Enable and start sushy-emulator
   └── VALIDATION: Redfish API responds at http://10.0.2.30:8000/redfish/v1/Systems/
-      (lists ocp_node_count VM UUIDs)
+      (lists one VM UUID per entry in ocp_nodes)
 
       NOTE: When KVM is enabled, bastion_repo (Step 2.0) also downloads KVM
             packages (qemu-kvm, libvirt, etc.) and pip wheels for sushy-tools
@@ -779,9 +784,20 @@ inventory/group_vars/all.yml          # Lowest precedence — global defaults
   ├── registry_private_ip: 10.0.2.20
   │
   │ OPENSHIFT NODE SCALING:
-  ├── ocp_node_count: 3                   # 1 for SNO, 3 for compact, or more
+  ├── ocp_topology: compact              # sno | compact | standard
+  ├── ocp_topology_presets: {...}         # node counts, per-VM sizing, data volume per topology
+  ├── ocp_topology_spec: (derived)        # ocp_topology_presets[ocp_topology]
+  ├── ocp_master_count: (derived)         # override directly to scale the control plane
+  ├── ocp_worker_count: (derived)         # override directly to scale workers
+  ├── ocp_node_count: (derived)           # masters + workers
   ├── ocp_node_ip_start: 100              # first node IP octet in 10.0.2.x
-  ├── ocp_node_ips: (derived)             # [10.0.2.100, ...] from count + start
+  ├── ocp_{master,worker}_vcpu            # (derived) per-VM sizing, individually overridable
+  ├── ocp_{master,worker}_memory_mb       # (derived)
+  ├── ocp_{master,worker}_disk_gb         # (derived)
+  ├── ocp_{master,worker}_storage_disk    # (derived) secondary disk for LVM Storage
+  ├── ocp_{master,worker}_storage_disk_gb # (derived)
+  ├── ocp_nodes: (derived)                # [{name, hostname, role, ip, vcpu, memory_mb, ...}]
+  ├── ocp_node_ips: (derived)             # ocp_nodes | map(attribute='ip')
   ├── api_vip: (derived)                  # 10.0.2.{start + count} — keepalived API VIP
   ├── ingress_vip: (derived)              # 10.0.2.{start + count + 1} — keepalived Ingress VIP
   │
@@ -802,12 +818,9 @@ inventory/group_vars/all.yml          # Lowest precedence — global defaults
   ├── kvm_private_ip: 10.0.2.30
   ├── kvm_instance_type: m5.metal
   ├── kvm_root_volume_size: 200
-  ├── kvm_data_volume_size: 500
-  ├── kvm_vm_vcpu: 32                     # Per VM
-  ├── kvm_vm_memory_mb: 131072            # Per VM (128 GiB)
-  ├── kvm_vm_disk_gb: 120                 # Per VM
-  ├── kvm_vm_storage_disk: true           # Secondary disk per VM (for LVM Storage)
-  ├── kvm_vm_storage_disk_gb: 500         # Per VM secondary disk
+  ├── kvm_data_volume_size: (derived)     # from the topology preset; override to resize
+  ├── kvm_reserved_vcpu: 8                # held back from VMs for the hypervisor
+  ├── kvm_reserved_memory_mb: 16384       # held back from VMs for the hypervisor
   ├── redfish_port: 8000
   │
   │ HARDENING:
@@ -900,8 +913,8 @@ Console and API from the internet. The bastion bridges this gap as an L4 reverse
   └─────────────────────────────────────┘
 ```
 
-IPs shown above are defaults for `ocp_node_count: 3`. VIPs shift when the count changes
-(see §5 Variable Hierarchy).
+IPs shown above are defaults for `ocp_topology: compact` (3 masters). VIPs shift when the
+node count changes (see §5 Variable Hierarchy).
 
 ### 7.2 Split-Horizon DNS
 

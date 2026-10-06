@@ -41,10 +41,26 @@ export AWS_ACCESS_KEY_ID="AKIA..."
 export AWS_SECRET_ACCESS_KEY="wJalr..."
 ```
 
+## Cluster Topology
+
+`ocp_topology` (in `inventory/group_vars/all.yml`) is the only knob for cluster shape —
+`sno`, `compact` (default), or `standard` (3 masters + 3 workers). The preset in
+`ocp_topology_presets` expands into `ocp_nodes`, the single source of truth for libvirt
+domains, BIND9 records, SSH config entries, and the secondary IPs on the KVM host ENI.
+Per-VM sizing and `kvm_data_volume_size` come from the same preset.
+
+Never hardcode node counts, node names, or VM sizing — derive from `ocp_nodes`. Each
+entry is `{name, hostname, role, ip, vcpu, memory_mb, disk_gb, storage_disk,
+storage_disk_gb}`. When adding a consumer, loop over `ocp_nodes`, not an index range.
+
+Every derived value stays individually overridable (`ocp_worker_count`,
+`ocp_master_vcpu`, `kvm_data_volume_size`, …). Keep it that way when extending the
+presets. See README "Cluster Topology" for the full table.
+
 ## Execution Commands
 
 ```bash
-# Full provision + configure
+# Full provision + configure (add -e ocp_topology=standard to change cluster shape)
 ansible-playbook playbooks/site.yml \
   -e aws_region=us-east-2 \
   -e sandbox_domain=example.com \
