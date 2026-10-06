@@ -92,6 +92,12 @@
     group: "{{ ansible_user | default('ec2-user') }}"
     mode: "0644"
 
+- name: ensure firewalld is running before opening ports
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: true
+    state: started
+
 - name: re-open firewall ports after stig remediation
   ansible.posix.firewalld:
     port: "{{ item }}"

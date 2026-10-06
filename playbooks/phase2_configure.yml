@@ -61,11 +61,41 @@
   hosts: role_registry
   gather_facts: false
   tasks:
+    - name: check if data volume is already mounted
+      ansible.builtin.command:
+        cmd: findmnt -n -o SOURCE /data
+      register: phase2_registry_existing_mount
+      changed_when: false
+      failed_when: false
+
+    - name: find data volume device
+      ansible.builtin.shell:
+        cmd: |
+          lsblk -dn -o NAME,TYPE | awk '$2 == "disk" {print "/dev/" $1}' | while read dev; do
+            if ! lsblk -n -o MOUNTPOINTS "$dev" 2>/dev/null | grep -q '/'; then
+              echo "$dev"; break
+            fi
+          done
+      register: phase2_registry_data_dev
+      changed_when: false
+      failed_when: phase2_registry_data_dev.stdout | length == 0
+      when: phase2_registry_existing_mount.rc != 0
+
+    - name: set data device fact
+      ansible.builtin.set_fact:
+        phase2_registry_data_device: >-
+          {{ phase2_registry_existing_mount.stdout | trim
+             if phase2_registry_existing_mount.rc == 0
+             else phase2_registry_data_dev.stdout }}
+
+    - name: show detected data volume
+      ansible.builtin.debug:
+        msg: "Data volume at {{ phase2_registry_data_device }}"
+
     - name: create filesystem on data volume
       community.general.filesystem:
         fstype: xfs
-        dev: /dev/nvme1n1
-      register: phase2_registry_mkfs
+        dev: "{{ phase2_registry_data_device }}"
 
     - name: create data mount point
       ansible.builtin.file:
@@ -78,8 +108,9 @@
     - name: mount data volume
       ansible.posix.mount:
         path: /data
-        src: /dev/nvme1n1
+        src: "{{ phase2_registry_data_device }}"
         fstype: xfs
+        opts: defaults,nofail
         state: mounted
 
     - name: set data directory ownership
@@ -164,8 +195,11 @@
       notify: reload networkmanager
 
     - name: configure dns resolver with internal and aws fallback
-      ansible.builtin.template:
-        src: bastion-resolv.conf.j2
+      ansible.builtin.copy:
+        content: |
+          search {{ cluster_domain }}
+          nameserver {{ services_private_ip }}
+          nameserver 10.0.0.2
         dest: /etc/resolv.conf
         owner: root
         group: root
