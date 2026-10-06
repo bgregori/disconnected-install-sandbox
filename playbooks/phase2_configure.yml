@@ -71,11 +71,13 @@
     - name: find data volume device
       ansible.builtin.shell:
         cmd: |
+          set -o pipefail
           lsblk -dn -o NAME,TYPE | awk '$2 == "disk" {print "/dev/" $1}' | while read dev; do
             if ! lsblk -n -o MOUNTPOINTS "$dev" 2>/dev/null | grep -q '/'; then
               echo "$dev"; break
             fi
           done
+        executable: /bin/bash
       register: phase2_registry_data_dev
       changed_when: false
       failed_when: phase2_registry_data_dev.stdout | length == 0

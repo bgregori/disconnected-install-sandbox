@@ -41,11 +41,13 @@
 - name: find data volume device
   ansible.builtin.shell:
     cmd: |
+      set -o pipefail
       lsblk -dn -o NAME,TYPE | awk '$2 == "disk" {print "/dev/" $1}' | while read dev; do
         if ! lsblk -n -o MOUNTPOINTS "$dev" 2>/dev/null | grep -q '/'; then
           echo "$dev"; break
         fi
       done
+    executable: /bin/bash
   register: kvm_host_data_dev_result
   changed_when: false
   failed_when: kvm_host_data_dev_result.stdout | length == 0

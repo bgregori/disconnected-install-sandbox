@@ -13,3 +13,8 @@ enable_list:
 
 use_default_rules: true
 offline: false
+
+# Included via include_tasks from teardown.yml, so it is a task file despite
+# living in playbooks/ - without this ansible-lint parses it as a play.
+kinds:
+  - tasks: "playbooks/teardown_eni_cleanup.yml"
