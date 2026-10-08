@@ -6,6 +6,7 @@
       - createrepo
       - yum-utils
       - tmux
+      - bind-utils
     state: present
 
 - name: create repo directory
@@ -23,7 +24,9 @@
       --resolve
       --alldeps
       --destdir={{ bastion_repo_base_dir }}/{{ bastion_repo_name }}
-      {{ (bastion_repo_packages + (bastion_repo_kvm_packages if bastion_repo_enable_kvm | bool else [])) | join(' ') }}
+      {{ (bastion_repo_packages
+          + bastion_repo_rpm_stack_packages
+          + (bastion_repo_kvm_packages if bastion_repo_enable_kvm | bool else [])) | join(' ') }}
   register: bastion_repo_dnf_download
   changed_when: "'No package downloaded' not in bastion_repo_dnf_download.stdout"
 

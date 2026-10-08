@@ -5,4 +5,4 @@ infra_ssh_config_dir: "~/.ssh"
 infra_ssh_config_file: "~/.ssh/config.d/disconnected-sandbox"
 # Sandbox hosts reuse static private IPs across reprovisions, so their host keys
 # change every time. Keep them out of the operator's real known_hosts.
-infra_ssh_config_known_hosts: "~/.ssh/known_hosts.disconnected-sandbox"
+infra_ssh_config_known_hosts: "{{ sandbox_known_hosts }}"

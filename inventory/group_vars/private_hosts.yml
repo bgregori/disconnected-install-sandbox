@@ -1,3 +1,34 @@
 ---
+# The ProxyCommand spawns a SECOND ssh process, and it inherits none of the
+# options ansible.cfg sets under [ssh_connection] -- those apply only to the
+# outer connection. So the known-hosts handling has to be repeated here, or
+# the inner hop falls back to the operator's real ~/.ssh/known_hosts:
+#
+#   - UserKnownHostsFile: same sandbox-scoped file as ansible.cfg, so a
+#     rebuilt bastion does not collide with the operator's real known_hosts.
+#     Without it the key Ansible already learned on the bastion hop is in a
+#     file this process never reads.
+#   - StrictHostKeyChecking=no: matches `host_key_checking = false` in
+#     ansible.cfg, which is what the outer connection already uses. It has to
+#     be repeated because two things change the bastion's key during a run.
+#     The default (ask) cannot prompt from inside a ProxyCommand, so ssh
+#     exits and the outer connection reports "Connection closed by UNKNOWN
+#     port 65535" -- a host-key failure wearing the costume of a network one.
+#
+#     accept-new is not enough. Enabling FIPS stops sshd offering ed25519,
+#     which is not FIPS 140-3 approved, so the bastion comes back from its
+#     FIPS reboot presenting ecdsa-sha2-nistp256 instead:
+#
+#       peer server KEXINIT: host key algorithms:
+#         rsa-sha2-512,rsa-sha2-256,ecdsa-sha2-nistp256
+#
+#     To ssh that is a CHANGED key, not a new one, and accept-new refuses it.
+#     Every private-host play after the bastion's FIPS reboot then fails.
+#     Rebuilt sandboxes also recycle the static private IPs with fresh keys.
+#     Both are expected here; sandbox_known_hosts keeps the blast radius off
+#     the operator's real known_hosts.
 ansible_ssh_common_args: >-
-  -o ProxyCommand="ssh -W %h:%p -i {{ ssh_key_path }} ec2-user@{{ hostvars[groups['role_bastion'][0]].ansible_host }}"
+  -o ProxyCommand="ssh -W %h:%p -i {{ ssh_key_path }}
+  -o UserKnownHostsFile={{ sandbox_known_hosts }}
+  -o StrictHostKeyChecking=no
+  ec2-user@{{ hostvars[groups['role_bastion'][0]].ansible_host }}"

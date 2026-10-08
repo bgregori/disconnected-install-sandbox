@@ -24,6 +24,15 @@ project_tag: disconnected-sandbox
 ssh_key_name: "{{ project_tag }}-key"
 ssh_key_path: "~/.ssh/{{ project_tag }}.pem"
 
+# Sandbox-scoped known_hosts. The private IPs below are static and recycled
+# on every rebuild, so sandbox host keys are kept out of the operator's real
+# ~/.ssh/known_hosts. Used by group_vars/private_hosts.yml (the ProxyCommand
+# hop) and by the infra_ssh_config role.
+#
+# ansible.cfg sets the same path literally under [ssh_connection], because
+# an ini file cannot template. Change both together.
+sandbox_known_hosts: "~/.ssh/known_hosts.{{ project_tag }}"
+
 # Static private IPs
 bastion_private_ip: "10.0.1.10"
 services_private_ip: "10.0.2.10"

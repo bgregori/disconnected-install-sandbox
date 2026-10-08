@@ -153,9 +153,49 @@
 - name: enable fips on private hosts
   hosts: role_services:role_registry:role_kvm
   gather_facts: false
+  pre_tasks:
+    # The bastion just rebooted for FIPS. Every connection to these hosts is a
+    # ProxyCommand tunnel through it, and ansible.cfg multiplexes with
+    # ControlPersist=60s -- so sockets cached by earlier plays still point at
+    # a tunnel whose far end no longer exists. Reusing one fails as "Data
+    # could not be sent to remote host ... Connection closed by UNKNOWN port
+    # 65535", which reads as though the private host is down when in fact it
+    # is the jump host that moved.
+    #
+    # The bastion's reboot task waits only for the bastion's own connection.
+    # Nothing re-establishes the tunnels layered on top of it, so do that here.
+    - name: drop ssh sockets that tunnelled through the pre-reboot bastion
+      ansible.builtin.meta: reset_connection
+
+    - name: wait for the tunnel to rebuild through the restarted bastion
+      ansible.builtin.wait_for_connection:
+        timeout: 300
   roles:
     - role: rhel_hardening
       rhel_hardening_apply_stig: false
+
+# Every host has now rebooted into FIPS, which stops sshd offering ed25519 --
+# not a FIPS 140-3 approved algorithm. They all present ecdsa/rsa instead, so
+# every key recorded before this point is stale and ssh reads the change as
+# REMOTE HOST IDENTIFICATION HAS CHANGED.
+#
+# The playbook itself tolerates that (StrictHostKeyChecking=no, matching
+# ansible.cfg), but the ~/.ssh/config.d/disconnected-sandbox stanzas written
+# by infra_ssh_config use accept-new, which refuses a changed key -- so
+# `ssh bastion-sandbox` by hand would fail after a run that otherwise worked.
+#
+# The file is sandbox-scoped and disposable by design. Drop it and let the
+# next connection repopulate it with the FIPS-era keys.
+- name: discard pre-fips host keys
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: remove stale sandbox known_hosts
+      ansible.builtin.file:
+        path: "{{ sandbox_known_hosts }}"
+        state: absent
 
 # Step 2.2: Configure DNS server
 - name: configure bind dns on services host

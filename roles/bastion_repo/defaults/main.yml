@@ -21,6 +21,26 @@ bastion_repo_packages:
   - policycoreutils-python-utils
   - nmstate
 
+# The rpm subpackages are versioned in lockstep -- each carries
+# `Requires: rpm-libs(x86-64) = <exact nevr>`. `dnf download --resolve` only
+# walks forward dependencies, so mirroring fapolicyd pulls
+# rpm-plugin-fapolicyd and its dep rpm-libs at the newest release, but none of
+# the siblings that require rpm-libs back. On an air-gapped host still at the
+# AMI's older release that is unsolvable -- dnf refuses to upgrade rpm-libs
+# because it would orphan the siblings, and `dnf install fapolicyd` fails with
+# "cannot install both rpm-libs-<new> and rpm-libs-<old>". STIG remediation of
+# RHEL-09-433010/433015 then errors out and fapolicyd never lands.
+# Mirror the whole stack so it upgrades as a unit.
+bastion_repo_rpm_stack_packages:
+  - rpm
+  - rpm-libs
+  - rpm-build-libs
+  - rpm-sign-libs
+  - python3-rpm
+  - rpm-plugin-audit
+  - rpm-plugin-selinux
+  - rpm-plugin-systemd-inhibit
+
 bastion_repo_kvm_packages:
   - qemu-kvm
   - libvirt

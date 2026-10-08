@@ -1,35 +1,129 @@
 ---
-- name: query enis in vpc
+# Clear everything that holds an ENI in the VPC, so the subnet delete that
+# follows cannot hit DependencyViolation.
+#
+# Ordering matters, because the three causes need different remedies and only
+# one of them is an ENI problem at all:
+#
+#   1. A running instance's PRIMARY ENI cannot be detached or deleted, at any
+#      force. The only remedy is terminating the instance. Step 2 of teardown
+#      terminates by `tag:Project`, so anything in the VPC created outside
+#      that tagging -- a hand-started instance, a half-failed provision run --
+#      survives it and holds the subnet. Sweep by VPC instead.
+#   2. Endpoint and NAT gateway ENIs are requester-managed: `ec2_eni
+#      state: absent` cannot remove them, it can only fail. Delete the owning
+#      resource and AWS reclaims the ENI.
+#   3. Genuinely orphaned ENIs, the only ones worth deleting directly.
+#
+# This file previously force-detached and deleted ENIs with
+# `failed_when: false` throughout, so cases 1 and 2 failed silently and
+# surfaced several tasks later as an opaque DependencyViolation naming only a
+# subnet id.
+
+- name: find any instances still in the vpc
+  amazon.aws.ec2_instance_info:
+    region: "{{ teardown_eni_region }}"
+    filters:
+      vpc-id: "{{ teardown_eni_vpc_id }}"
+      instance-state-name:
+        - pending
+        - running
+        - stopping
+        - stopped
+        - shutting-down
+  register: teardown_vpc_instances
+
+- name: report instances the tag-filtered pass would have left behind
+  ansible.builtin.debug:
+    msg: >-
+      Terminating {{ teardown_vpc_instances.instances | length }} instance(s)
+      found by VPC:
+      {{ teardown_vpc_instances.instances
+         | map(attribute='instance_id') | join(', ') }}
+  when: teardown_vpc_instances.instances | length > 0
+
+# wait: true matters -- a shutting-down instance still owns its primary ENI.
+- name: terminate remaining instances in the vpc
+  amazon.aws.ec2_instance:
+    instance_ids: "{{ teardown_vpc_instances.instances | map(attribute='instance_id') | list }}"
+    region: "{{ teardown_eni_region }}"
+    state: absent
+    wait: true
+  when: teardown_vpc_instances.instances | length > 0
+
+- name: find vpc endpoints
+  amazon.aws.ec2_vpc_endpoint_info:
+    region: "{{ teardown_eni_region }}"
+    filters:
+      vpc-id: "{{ teardown_eni_vpc_id }}"
+  register: teardown_vpc_endpoints
+
+- name: delete vpc endpoints
+  amazon.aws.ec2_vpc_endpoint:
+    region: "{{ teardown_eni_region }}"
+    vpc_endpoint_id: "{{ item.vpc_endpoint_id }}"
+    state: absent
+    wait: true
+  loop: "{{ teardown_vpc_endpoints.vpc_endpoints | default([]) }}"
+  loop_control:
+    label: "{{ item.vpc_endpoint_id }}"
+
+- name: find nat gateways
+  amazon.aws.ec2_vpc_nat_gateway_info:
+    region: "{{ teardown_eni_region }}"
+    filters:
+      vpc-id: "{{ teardown_eni_vpc_id }}"
+  register: teardown_nat_gateways
+
+- name: delete nat gateways
+  amazon.aws.ec2_vpc_nat_gateway:
+    region: "{{ teardown_eni_region }}"
+    nat_gateway_id: "{{ item.nat_gateway_id }}"
+    state: absent
+    wait: true
+    release_eip: true
+  loop: >-
+    {{ teardown_nat_gateways.result | default([])
+       | rejectattr('state', 'in', ['deleted', 'deleting']) | list }}
+  loop_control:
+    label: "{{ item.nat_gateway_id }}"
+
+# AWS releases ENIs asynchronously once the owning resource is gone, so poll
+# rather than sleeping a fixed interval and hoping it was long enough.
+- name: wait for attached enis to clear
   amazon.aws.ec2_eni_info:
     region: "{{ teardown_eni_region }}"
     filters:
       vpc-id: "{{ teardown_eni_vpc_id }}"
   register: teardown_eni_list
+  until: >-
+    teardown_eni_list.network_interfaces
+    | selectattr('status', 'equalto', 'in-use') | list | length == 0
+  retries: 12
+  delay: 10
+  failed_when: false
 
-- name: detach in-use enis
+- name: detach any eni still attached
   amazon.aws.ec2_eni:
     eni_id: "{{ item.id }}"
     region: "{{ teardown_eni_region }}"
     attached: false
     force_detach: true
-  loop: "{{ teardown_eni_list.network_interfaces | selectattr('status', 'equalto', 'in-use') | list }}"
+  loop: >-
+    {{ teardown_eni_list.network_interfaces
+       | selectattr('status', 'equalto', 'in-use') | list }}
   loop_control:
     label: "{{ item.id }}"
   failed_when: false
 
-- name: wait for eni detachment
-  ansible.builtin.pause:
-    seconds: 45
-  when: teardown_eni_list.network_interfaces | selectattr('status', 'equalto', 'in-use') | list | length > 0
-
-- name: re-query enis after detach wait
+- name: re-query enis
   amazon.aws.ec2_eni_info:
     region: "{{ teardown_eni_region }}"
     filters:
       vpc-id: "{{ teardown_eni_vpc_id }}"
   register: teardown_eni_list
 
-- name: delete enis in vpc
+- name: delete remaining enis
   amazon.aws.ec2_eni:
     eni_id: "{{ item.id }}"
     region: "{{ teardown_eni_region }}"
@@ -37,5 +131,38 @@
   loop: "{{ teardown_eni_list.network_interfaces }}"
   loop_control:
     label: "{{ item.id }}"
-  when: teardown_eni_list.network_interfaces | length > 0
+  register: teardown_eni_delete
+  retries: 3
+  delay: 10
+  until: teardown_eni_delete is not failed
   failed_when: false
+
+- name: confirm the vpc is clear of enis
+  amazon.aws.ec2_eni_info:
+    region: "{{ teardown_eni_region }}"
+    filters:
+      vpc-id: "{{ teardown_eni_vpc_id }}"
+  register: teardown_eni_final
+
+# Stop here rather than letting the subnet delete fail with a DependencyViolation
+# that names a subnet and nothing else. Whatever is listed is what holds the VPC,
+# and the description says which AWS service owns it.
+- name: fail with what is still holding the vpc
+  ansible.builtin.fail:
+    msg: |
+      {{ teardown_eni_final.network_interfaces | length }} network interface(s)
+      still in VPC {{ teardown_eni_vpc_id }}. The subnet delete cannot succeed
+      until these are gone:
+      {% for eni in teardown_eni_final.network_interfaces %}
+
+        {{ eni.id }}  status={{ eni.status }}
+          description = {{ eni.description | default('') | trim | default('(none)', true) }}
+          requester   = {{ eni.requester_id | default('(none)') }}
+          attached to = {{ eni.attachment.instance_id | default('(not an instance)') }}
+      {% endfor %}
+
+      A requester_id means another AWS service owns the interface and it
+      cannot be deleted directly -- remove that resource instead. This
+      teardown already handles instances, VPC endpoints and NAT gateways;
+      anything else listed was created outside it.
+  when: teardown_eni_final.network_interfaces | length > 0

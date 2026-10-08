@@ -199,11 +199,132 @@
           when: not item.associations | selectattr('main', 'defined') | selectattr('main') | list | length > 0
           failed_when: false
 
+        # Non-default NACLs, peerings and egress-only gateways block DeleteVpc
+        # the same way subnets do, and nothing above removes them.
+        - name: find non-default network acls
+          amazon.aws.ec2_vpc_nacl_info:
+            region: "{{ aws_region }}"
+            filters:
+              vpc-id: "{{ teardown_vpc_id }}"
+          register: sandbox_nacls
+
+        - name: delete non-default network acls
+          amazon.aws.ec2_vpc_nacl:
+            nacl_id: "{{ item.nacl_id }}"
+            region: "{{ aws_region }}"
+            state: absent
+          loop: >-
+            {{ sandbox_nacls.nacls | default([])
+               | rejectattr('is_default') | list }}
+          loop_control:
+            label: "{{ item.nacl_id }}"
+          failed_when: false
+
+        - name: find vpc peering connections
+          amazon.aws.ec2_vpc_peering_info:
+            region: "{{ aws_region }}"
+            filters:
+              requester-vpc-info.vpc-id: "{{ teardown_vpc_id }}"
+          register: sandbox_peerings
+
+        - name: delete vpc peering connections
+          amazon.aws.ec2_vpc_peering:
+            peering_id: "{{ item.vpc_peering_connection_id }}"
+            region: "{{ aws_region }}"
+            state: absent
+          loop: >-
+            {{ sandbox_peerings.vpc_peering_connections | default([])
+               | rejectattr('status.code', 'in', ['deleted', 'deleting']) | list }}
+          loop_control:
+            label: "{{ item.vpc_peering_connection_id }}"
+          failed_when: false
+
+        - name: delete egress-only internet gateway
+          amazon.aws.ec2_vpc_egress_igw:
+            vpc_id: "{{ teardown_vpc_id }}"
+            region: "{{ aws_region }}"
+            state: absent
+          failed_when: false
+
         - name: detach and delete internet gateway
           amazon.aws.ec2_vpc_igw:
             vpc_id: "{{ teardown_vpc_id }}"
             region: "{{ aws_region }}"
             state: absent
+
+        # Security groups are deleted above with `failed_when: false`, so a
+        # failure there stays invisible until DeleteVpc reports
+        # DependencyViolation and names nothing. Retry them now that every
+        # ENI is gone -- an SG still attached to an interface cannot be
+        # deleted, which is the usual reason the first pass failed.
+        - name: re-check security groups in vpc
+          amazon.aws.ec2_security_group_info:
+            region: "{{ aws_region }}"
+            filters:
+              vpc-id: "{{ teardown_vpc_id }}"
+          register: check_sgs
+
+        - name: delete any security group left behind
+          amazon.aws.ec2_security_group:
+            group_id: "{{ item.group_id }}"
+            region: "{{ aws_region }}"
+            state: absent
+          loop: >-
+            {{ check_sgs.security_groups
+               | rejectattr('group_name', 'equalto', 'default') | list }}
+          loop_control:
+            label: "{{ item.group_name }}"
+          register: sg_retry
+          retries: 3
+          delay: 10
+          until: sg_retry is not failed
+          failed_when: false
+
+        - name: confirm nothing is left holding the vpc
+          block:
+            - name: final security group check
+              amazon.aws.ec2_security_group_info:
+                region: "{{ aws_region }}"
+                filters:
+                  vpc-id: "{{ teardown_vpc_id }}"
+              register: final_sgs
+
+            - name: final subnet check
+              amazon.aws.ec2_vpc_subnet_info:
+                region: "{{ aws_region }}"
+                filters:
+                  vpc-id: "{{ teardown_vpc_id }}"
+              register: final_subnets
+
+            - name: final network interface check
+              amazon.aws.ec2_eni_info:
+                region: "{{ aws_region }}"
+                filters:
+                  vpc-id: "{{ teardown_vpc_id }}"
+              register: final_enis
+
+        - name: fail with what still blocks the vpc delete
+          vars:
+            leftover_sgs: >-
+              {{ final_sgs.security_groups
+                 | rejectattr('group_name', 'equalto', 'default') | list }}
+          ansible.builtin.fail:
+            msg: |
+              VPC {{ teardown_vpc_id }} still has dependencies, so DeleteVpc
+              cannot succeed. Remaining:
+
+                security groups   : {{ leftover_sgs | map(attribute='group_name') | join(', ') or 'none' }}
+                subnets           : {{ final_subnets.subnets | map(attribute='id') | join(', ') or 'none' }}
+                network interfaces: {{ final_enis.network_interfaces | map(attribute='id') | join(', ') or 'none' }}
+
+              Security groups most often survive because they reference each
+              other, so neither can be deleted until the rule between them is
+              revoked. Deleting them by hand in any order and re-running this
+              playbook clears it.
+          when: >-
+            leftover_sgs | length > 0
+            or final_subnets.subnets | length > 0
+            or final_enis.network_interfaces | length > 0
 
         - name: delete vpc
           amazon.aws.ec2_vpc_net:
