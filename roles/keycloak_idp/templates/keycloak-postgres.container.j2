@@ -1,0 +1,43 @@
+{{ ansible_managed | comment }}
+# Quadlet unit: systemd generates {{ keycloak_idp_postgres_service }} from this file.
+#
+# RHBK requires a real database -- dev-file/H2 is explicitly for development
+# and loses everything on a container replacement. PostgreSQL 16 is inside
+# the 14.x-18.x range RHBK 26.6 supports.
+
+[Unit]
+Description=PostgreSQL backing store for Keycloak
+
+[Container]
+ContainerName={{ keycloak_idp_postgres_container_name }}
+Image={{ keycloak_idp_postgres_image }}
+Network={{ keycloak_idp_network }}.network
+
+# POSTGRESQL_USER/PASSWORD/DATABASE are the three variables this image uses
+# to initialise the cluster on first start. The password comes from the
+# EnvironmentFile so it stays out of this world-readable unit.
+Environment=POSTGRESQL_USER={{ keycloak_idp_db_user }}
+Environment=POSTGRESQL_DATABASE={{ keycloak_idp_db_name }}
+EnvironmentFile={{ keycloak_idp_conf_dir }}/postgres.env
+
+# :Z gives the directory this container's private SELinux label. The host
+# directory is owned by UID 26 because that is the UID this image is
+# permanently committed to running as.
+Volume={{ keycloak_idp_pgdata_dir }}:/var/lib/pgsql/data:Z
+
+Memory={{ keycloak_idp_postgres_memory }}
+
+HealthCmd=pg_isready -U {{ keycloak_idp_db_user }} -d {{ keycloak_idp_db_name }}
+HealthRetries=5
+HealthStartPeriod=30s
+
+# Not published to the host at all. Keycloak reaches it over the podman
+# network; nothing else has any business talking to it.
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

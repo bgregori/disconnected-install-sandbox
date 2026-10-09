@@ -1,0 +1,131 @@
+---
+# A private CA for the issuer's serving certificate.
+#
+# Let's Encrypt is not an option -- the services host has no internet and the
+# name resolves only inside the VPC. A self-signed leaf is not an option
+# either: the consuming cluster needs a CA to trust, and OpenShift's OIDC
+# config takes a CA bundle ConfigMap, not a leaf pin. So: a one-key CA whose
+# certificate is the artifact the operator hands to the cluster.
+#
+# RSA, not EC, and SHA-256: both are FIPS 140-3 approved, and RSA avoids any
+# question about which curves the host's crypto policy still offers once
+# fips-mode-setup has run.
+
+- name: create keycloak pki directory
+  ansible.builtin.file:
+    path: "{{ keycloak_idp_pki_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: generate issuer ca private key
+  community.crypto.openssl_privatekey:
+    path: "{{ keycloak_idp_ca_key_path }}"
+    type: RSA
+    size: "{{ keycloak_idp_key_size }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: generate issuer ca certificate signing request
+  community.crypto.openssl_csr:
+    path: "{{ keycloak_idp_pki_dir }}/keycloak-ca.csr"
+    privatekey_path: "{{ keycloak_idp_ca_key_path }}"
+    common_name: "{{ keycloak_idp_ca_common_name }}"
+    basic_constraints:
+      - "CA:TRUE"
+    basic_constraints_critical: true
+    key_usage:
+      - keyCertSign
+      - cRLSign
+    key_usage_critical: true
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: generate issuer ca certificate
+  community.crypto.x509_certificate:
+    path: "{{ keycloak_idp_ca_cert_path }}"
+    csr_path: "{{ keycloak_idp_pki_dir }}/keycloak-ca.csr"
+    privatekey_path: "{{ keycloak_idp_ca_key_path }}"
+    provider: selfsigned
+    selfsigned_not_after: "{{ keycloak_idp_ca_validity }}"
+    selfsigned_digest: sha256
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: generate serving private key
+  community.crypto.openssl_privatekey:
+    path: "{{ keycloak_idp_tls_key_path }}"
+    type: RSA
+    size: "{{ keycloak_idp_key_size }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+# The SANs are the names anything might dial the issuer by. keycloak.<domain>
+# is the one in the issuer URL and the only one that matters to the cluster;
+# the others are here so an operator poking at it from the bastion by host
+# name or IP does not get a name-mismatch and conclude the service is broken.
+- name: generate serving certificate signing request
+  community.crypto.openssl_csr:
+    path: "{{ keycloak_idp_pki_dir }}/keycloak.csr"
+    privatekey_path: "{{ keycloak_idp_tls_key_path }}"
+    common_name: "{{ keycloak_idp_hostname }}"
+    subject_alt_name: "{{ keycloak_idp_tls_san }}"
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    extended_key_usage:
+      - serverAuth
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: generate serving certificate signed by the issuer ca
+  community.crypto.x509_certificate:
+    path: "{{ keycloak_idp_tls_cert_path }}"
+    csr_path: "{{ keycloak_idp_pki_dir }}/keycloak.csr"
+    provider: ownca
+    ownca_path: "{{ keycloak_idp_ca_cert_path }}"
+    ownca_privatekey_path: "{{ keycloak_idp_ca_key_path }}"
+    ownca_not_after: "{{ keycloak_idp_cert_validity }}"
+    ownca_digest: sha256
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart keycloak
+
+# The container reads these, and it does not run as root. Red Hat container
+# images run as an arbitrary UID in group 0, so group-readable with group root
+# is what the key needs -- 0600 would lock the server out of its own key.
+- name: stage serving material where the container can read it
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - src: "{{ keycloak_idp_tls_cert_path }}"
+      dest: "{{ keycloak_idp_container_cert_dir }}/tls.crt"
+      mode: "0644"
+    - src: "{{ keycloak_idp_tls_key_path }}"
+      dest: "{{ keycloak_idp_container_cert_dir }}/tls.key"
+      mode: "0640"
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: restart keycloak
+
+- name: trust the issuer ca on the services host itself
+  ansible.builtin.copy:
+    src: "{{ keycloak_idp_ca_cert_path }}"
+    dest: /etc/pki/ca-trust/source/anchors/keycloak-ca.crt
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  notify: update ca trust

@@ -154,6 +154,63 @@
       ansible.builtin.debug:
         msg: "Redfish BMC: {{ validate_redfish_systems.json.Members | length }} systems registered"
 
+- name: validate keycloak oidc issuer
+  hosts: role_services
+  gather_facts: false
+
+  tasks:
+    - name: skip the issuer checks when the idp is disabled
+      ansible.builtin.meta: end_play
+      when: not (enable_keycloak_idp | bool)
+
+    # The discovery document is exactly what an OpenShift cluster fetches
+    # first when it is pointed at an issuer, so this is the same request the
+    # cluster will make -- served over TLS, validated against the same CA the
+    # cluster gets handed, not with validate_certs disabled.
+    - name: fetch the oidc discovery document
+      ansible.builtin.uri:
+        url: "{{ keycloak_issuer_url }}/.well-known/openid-configuration"
+        method: GET
+        return_content: true
+        status_code: 200
+        ca_path: "{{ keycloak_ca_cert_path }}"
+      register: validate_keycloak_discovery
+      retries: 6
+      delay: 10
+      until: validate_keycloak_discovery.status | default(0) == 200
+
+    # A discovery document that advertises a different issuer than the URL it
+    # was served from is the classic Keycloak-behind-the-wrong-hostname bug,
+    # and the cluster rejects every token it mints. Catch it here.
+    - name: assert the issuer is what the cluster will be configured with
+      ansible.builtin.assert:
+        that:
+          - validate_keycloak_discovery.json.issuer == keycloak_issuer_url
+          - validate_keycloak_discovery.json.jwks_uri is defined
+        fail_msg: >-
+          Issuer mismatch: expected {{ keycloak_issuer_url }},
+          discovery document says {{ validate_keycloak_discovery.json.issuer | default('nothing') }}
+        success_msg: "OIDC issuer {{ keycloak_issuer_url }} answers and self-reports correctly"
+
+- name: validate keycloak reachability from the cluster subnet
+  hosts: role_registry:role_kvm
+  gather_facts: false
+
+  tasks:
+    - name: skip the reachability check when the idp is disabled
+      ansible.builtin.meta: end_play
+      when: not (enable_keycloak_idp | bool)
+
+    # Proves the path the OCP nodes will take: DNS record, services security
+    # group ingress, and firewalld on the services host. The TLS handshake is
+    # not attempted -- these hosts have no reason to carry the issuer CA.
+    - name: connect to the issuer port
+      ansible.builtin.wait_for:
+        host: "{{ keycloak_hostname }}"
+        port: "{{ keycloak_port }}"
+        timeout: 15
+        state: started
+
 - name: validate route53 records
   hosts: localhost
   connection: local
@@ -197,6 +254,7 @@
           - "API endpoint:     https://api.{{ cluster_domain }}:6443"
           - "Console:          https://console-openshift-console.apps.{{ cluster_domain }}"
           - "Registry host:    registry.{{ cluster_domain }} (not yet configured — use mirror-registry)"
+          - "OIDC issuer:      {{ keycloak_issuer_url }}"
           - "{% if enable_kvm_host | default(false) %}KVM host:         kvm.{{ cluster_domain }} (Redfish BMC on :{{ redfish_port }}){% endif %}"
           - ""
           - "The sandbox is ready for disconnected OpenShift 4 installation."

@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  author: bgregori
+  license: GPL-3.0-or-later
+  role_name: keycloak_idp
+  description: Red Hat build of Keycloak as an OIDC identity provider for the disconnected sandbox
+  min_ansible_version: "2.15"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+dependencies: []

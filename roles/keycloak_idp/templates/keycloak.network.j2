@@ -1,0 +1,10 @@
+{{ ansible_managed | comment }}
+# A user-defined podman network, not the default bridge, for one reason:
+# only on a user-defined network does podman's DNS resolve container names,
+# which is how Keycloak finds "{{ keycloak_idp_postgres_container_name }}".
+
+[Unit]
+Description=Keycloak container network
+
+[Network]
+NetworkName={{ keycloak_idp_network }}

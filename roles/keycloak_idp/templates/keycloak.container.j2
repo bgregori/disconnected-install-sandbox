@@ -1,0 +1,86 @@
+{{ ansible_managed | comment }}
+# Quadlet unit: systemd generates {{ keycloak_idp_service }} from this file.
+
+[Unit]
+Description=Red Hat build of Keycloak OIDC identity provider
+Requires={{ keycloak_idp_postgres_service }}
+After={{ keycloak_idp_postgres_service }}
+
+[Container]
+ContainerName={{ keycloak_idp_container_name }}
+Image={{ keycloak_idp_image }}
+Network={{ keycloak_idp_network }}.network
+
+# Bound to the private address, not 0.0.0.0. The management interface --
+# /health and /metrics, on its own port since RHBK 26 -- is on loopback only
+# and never leaves the host.
+PublishPort={{ services_private_ip }}:{{ keycloak_idp_port }}:{{ keycloak_idp_port }}
+PublishPort=127.0.0.1:{{ keycloak_idp_management_port }}:{{ keycloak_idp_management_port }}
+
+# Read-only, and :Z so each gets this container's private SELinux label.
+# Both are read as UID 1000 in group 0.
+Volume={{ keycloak_idp_container_cert_dir }}:/etc/keycloak/certs:ro,Z
+Volume={{ keycloak_idp_import_dir }}:/opt/keycloak/data/import:ro,Z
+
+# Database. KC_DB is a BUILD-time option; the stock image is not pre-built,
+# so `start` re-runs the augmentation and picks it up. That costs a few
+# seconds per start. The supported way to avoid it is a two-stage
+# Containerfile that bakes `kc.sh build` in and runs `start --optimized`,
+# which is worth doing if start time ever matters here.
+Environment=KC_DB=postgres
+Environment=KC_DB_URL_HOST={{ keycloak_idp_postgres_container_name }}
+Environment=KC_DB_URL_PORT={{ keycloak_idp_db_port }}
+Environment=KC_DB_URL_DATABASE={{ keycloak_idp_db_name }}
+Environment=KC_DB_USERNAME={{ keycloak_idp_db_user }}
+
+# The issuer. Given as a full URL rather than a bare hostname so the port and
+# scheme in every token and in the discovery document are fixed, not inferred
+# from whatever Host header the request arrived with.
+Environment=KC_HOSTNAME={{ keycloak_idp_issuer_base_url }}
+
+# Keycloak terminates TLS itself -- nothing proxies it. So: no
+# KC_PROXY_HEADERS (setting it without a trusted proxy in front lets a client
+# forge its own forwarded headers) and no KC_HTTP_ENABLED (default false,
+# and there is no plaintext listener to want).
+Environment=KC_HTTPS_PORT={{ keycloak_idp_port }}
+Environment=KC_HTTPS_CERTIFICATE_FILE=/etc/keycloak/certs/tls.crt
+Environment=KC_HTTPS_CERTIFICATE_KEY_FILE=/etc/keycloak/certs/tls.key
+
+# Health on the management port. The management interface inherits the main
+# listener's scheme, which here is HTTPS; forcing http keeps the loopback
+# readiness probe off the issuer certificate, which is not valid for
+# 127.0.0.1 and should not be.
+Environment=KC_HEALTH_ENABLED=true
+Environment=KC_HTTP_MANAGEMENT_PORT={{ keycloak_idp_management_port }}
+Environment=KC_HTTP_MANAGEMENT_SCHEME={{ keycloak_idp_management_scheme }}
+
+Environment=KC_BOOTSTRAP_ADMIN_USERNAME={{ keycloak_idp_bootstrap_admin_user }}
+
+# KC_DB_PASSWORD and KC_BOOTSTRAP_ADMIN_PASSWORD. Generated alphanumeric, so
+# they cannot contain a '$' and do not need the KCRAW_ prefix that exists to
+# stop Keycloak's expression expansion eating one.
+EnvironmentFile={{ keycloak_idp_conf_dir }}/keycloak.env
+
+# The image sizes its heap at 70% of whatever memory it can see. Without a
+# limit that is the whole host, which also runs BIND and chrony.
+Memory={{ keycloak_idp_memory }}
+
+# No HealthCmd here on purpose: the server image is built on UBI Micro and
+# ships no curl, wget or shell to probe itself with. Readiness is checked
+# from the host instead, against the loopback management port.
+
+Exec=start --import-realm
+
+[Service]
+# The database may still be initialising on a cold boot. Keycloak exits if it
+# cannot reach it, so let systemd keep trying rather than ordering on a
+# healthcheck gate that needs a newer podman than RHEL 9 guarantees.
+Restart=always
+RestartSec=10
+# First start runs the Quarkus augmentation and then the realm import, and
+# the server does not finish starting until the import completes. That is
+# well past systemd's 90-second default.
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

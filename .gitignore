@@ -16,6 +16,9 @@ pull-secret.txt
 # Staged RPM bundles
 files/rpms/*.rpm
 
+# Artifacts collected off the sandbox (the Keycloak issuer CA, ...)
+artifacts/
+
 # Python
 __pycache__/
 *.pyc

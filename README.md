@@ -15,6 +15,7 @@ Ansible playbooks that provision an isolated AWS sandbox simulating a **disconne
                  │      │                                               │
                  │      ├── services (t3.medium, 50 GiB)                        │
                  │      │     BIND9 DNS + Chrony NTP                    │
+                 │      │     Keycloak OIDC issuer (:8443) + PostgreSQL │
                  │      │                                               │
                  │      ├── registry (t3.large + 500 GiB)               │
                  │      │     provisioned, not configured                │
@@ -34,6 +35,23 @@ Ansible playbooks that provision an isolated AWS sandbox simulating a **disconne
 **3-4 hosts** across 2 subnets (4 when KVM is enabled), with split-horizon DNS (Route53 external, BIND9 internal), HAProxy L4 TCP passthrough for API/console ingress, FIPS 140-3 enabled, and DISA STIG applied on all hosts.
 
 **KVM bare metal simulation (optional, default: enabled):** An m5.metal EC2 instance runs libvirt/KVM with the OCP node VMs for the selected [cluster topology](#cluster-topology), using bridge networking with proxy ARP — VMs appear as real hosts on the private subnet. sushy-emulator provides a Redfish BMC API, enabling the **OpenShift Agent-Based Installer (ABI)** — the standard method for disconnected bare metal deployments. Toggle with `enable_kvm_host: false` to skip (environment works the same as before, with OCP nodes deferred to the IPI installer).
+
+**OIDC identity provider:** The services host also runs the Red Hat build of Keycloak
+(RHBK) with a PostgreSQL backing store, both as podman containers managed by Quadlet, serving
+an issuer at `https://keycloak.ocp.{sandbox_domain}:8443/realms/openshift` for a cluster to
+federate to. The images cannot be pulled on an air-gapped host, so the bastion pulls them and
+`podman save`s them into the same httpd document root that already serves the yum repo. That
+pull needs Red Hat registry credentials:
+
+```bash
+ansible-playbook playbooks/phase2_configure.yml -i inventory/aws_ec2.yml \
+  -e bastion_repo_registry_auth_file=~/pull-secret.json
+```
+
+Without it Phase 2 fails fast with an explanatory message. Skip the IdP entirely with
+`-e enable_keycloak_idp=false`, which drops both the image staging and the role. See
+`roles/keycloak_idp/defaults/main.yml` for what the role does and does not do about FIPS,
+and for Red Hat's support posture on running RHBK under podman.
 
 The **registry host** is provisioned as infrastructure only — registry software setup using Red Hat's `mirror-registry` binary and `oc mirror v2` is handled by a separate project.
 
@@ -251,6 +269,8 @@ Runs on remote hosts via SSH through the bastion ProxyCommand tunnel:
 8. **KVM host** (when enabled) — libvirt/KVM with 3 OCP node VMs using bridge networking with proxy ARP
 9. **Redfish BMC** (when enabled) — sushy-emulator for Redfish API access to VMs
 10. **DISA STIG** — OpenSCAP remediation on private hosts first, then bastion
+11. **Keycloak OIDC issuer** — RHBK + PostgreSQL in podman on the services host, after the
+    private-host STIG pass and before the bastion's
 
 STIG runs on private hosts before bastion so the bastion's httpd repo remains available while private hosts install `openscap-scanner` and `scap-security-guide` from it. The STIG remediation and sudo NOPASSWD restoration run in a single shell command to prevent lockout.
 
@@ -314,6 +334,7 @@ roles/bastion_repo     Phase 2 — Local yum repo on bastion
 roles/bind_dns         Phase 2 — BIND9 DNS server
 roles/chrony_ntp       Phase 2 — Chrony NTP server
 roles/common_client    Phase 2 — DNS/NTP client config for all private hosts
+roles/keycloak_idp     Phase 2 — Red Hat build of Keycloak as an OIDC issuer
 roles/bastion_haproxy  Phase 2 — HAProxy reverse proxy
 roles/kvm_host         Phase 2 — KVM/libvirt host with OCP node VMs (optional)
 roles/redfish_bmc      Phase 2 — sushy-emulator Redfish BMC (optional)

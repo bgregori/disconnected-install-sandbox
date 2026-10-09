@@ -345,7 +345,8 @@
       rhel_hardening_firewall_ports: >-
         {{ (['8443/tcp'] if 'role_registry' in group_names else [])
          + (['8888/tcp', '8000/tcp'] if 'role_kvm' in group_names else [])
-         + (['53/tcp', '53/udp', '123/udp'] if 'role_services' in group_names else []) }}
+         + (['53/tcp', '53/udp', '123/udp', keycloak_port ~ '/tcp']
+            if 'role_services' in group_names else []) }}
 
 # Step 2.9: Re-apply KVM networking after STIG reboot
 - name: restore kvm networking after stig
@@ -356,6 +357,27 @@
       ansible.builtin.systemd:
         name: kvm-networking
         state: restarted
+
+# Step 2.8.1: Keycloak OIDC identity provider on the services host
+#
+# Deliberately after the private-host STIG pass and before the bastion's.
+#
+# After, because Keycloak runs in containers and the hardening is what it has
+# to survive: fapolicyd blocks the OCI runtime's dynamic loader, SELinux is
+# enforcing so every bind mount needs a label, firewalld is closed, and the
+# STIG reboot would otherwise land on a freshly-started server. Standing the
+# IdP up on the hardened host means the role proves it works there, rather
+# than working once and breaking at the next reboot.
+#
+# Before the bastion's, because the images arrive over HTTP from the bastion
+# repo, and STIG's httpd remediation can take that repo down -- the same
+# ordering constraint that puts the private hosts first in Step 2.8.
+- name: configure keycloak identity provider
+  hosts: role_services
+  gather_facts: false
+  roles:
+    - role: keycloak_idp
+      when: enable_keycloak_idp | bool
 
 - name: apply stig on bastion
   hosts: role_bastion

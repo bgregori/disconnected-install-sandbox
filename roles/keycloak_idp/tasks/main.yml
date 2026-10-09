@@ -1,0 +1,21 @@
+---
+- name: include runtime preparation
+  ansible.builtin.include_tasks: prepare.yml
+
+- name: include container image relay from the bastion
+  ansible.builtin.include_tasks: images.yml
+
+- name: include secret generation
+  ansible.builtin.include_tasks: secrets.yml
+
+- name: include tls material
+  ansible.builtin.include_tasks: tls.yml
+
+- name: include realm definition
+  ansible.builtin.include_tasks: realm.yml
+
+- name: include container units
+  ansible.builtin.include_tasks: containers.yml
+
+- name: include verification and summary
+  ansible.builtin.include_tasks: verify.yml

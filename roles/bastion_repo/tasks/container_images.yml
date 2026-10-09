@@ -1,0 +1,84 @@
+---
+- name: install podman on the bastion
+  ansible.builtin.dnf:
+    name: podman
+    state: present
+
+- name: assert a registry auth file was supplied
+  ansible.builtin.assert:
+    that:
+      - bastion_repo_registry_auth_file | length > 0
+    fail_msg: >-
+      registry.redhat.io requires authentication. Pass a container auth file
+      with -e bastion_repo_registry_auth_file=/path/to/pull-secret.json, or
+      set -e bastion_repo_stage_container_images=false to skip staging the
+      Keycloak images.
+
+- name: create the registry auth directory
+  ansible.builtin.file:
+    path: "{{ bastion_repo_registry_auth_dest | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: place the registry auth file on the bastion
+  ansible.builtin.copy:
+    src: "{{ bastion_repo_registry_auth_file }}"
+    dest: "{{ bastion_repo_registry_auth_dest }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: create the container image staging directory
+  ansible.builtin.file:
+    path: "{{ bastion_repo_container_dir }}"
+    state: directory
+    owner: apache
+    group: apache
+    mode: "0755"
+
+- name: check which images are already pulled
+  ansible.builtin.command:
+    cmd: "podman image exists {{ item.image }}"
+  loop: "{{ bastion_repo_container_images }}"
+  loop_control:
+    label: "{{ item.image }}"
+  register: bastion_repo_image_present
+  changed_when: false
+  failed_when: false
+
+- name: pull the missing images
+  ansible.builtin.command:
+    cmd: >-
+      podman pull --authfile {{ bastion_repo_registry_auth_dest }}
+      {{ item.item.image }}
+  loop: "{{ bastion_repo_image_present.results }}"
+  loop_control:
+    label: "{{ item.item.image }}"
+  when: item.rc != 0
+  changed_when: true
+  register: bastion_repo_image_pull
+
+- name: check which image archives already exist
+  ansible.builtin.stat:
+    path: "{{ bastion_repo_container_dir }}/{{ item.archive }}"
+  loop: "{{ bastion_repo_container_images }}"
+  loop_control:
+    label: "{{ item.archive }}"
+  register: bastion_repo_archive_stat
+
+# Export when there is no archive yet, or when the pull above brought down a
+# newer image than the archive on disk was made from. item.0 is the stat,
+# item.1 the pull.
+- name: export the images as archives for the air-gapped hosts
+  ansible.builtin.command:
+    cmd: >-
+      podman save --output {{ bastion_repo_container_dir }}/{{ item.0.item.archive }}
+      {{ item.0.item.image }}
+  loop: "{{ bastion_repo_archive_stat.results | zip(bastion_repo_image_pull.results) | list }}"
+  loop_control:
+    label: "{{ item.0.item.archive }}"
+  when: not item.0.stat.exists or item.1 is changed
+  changed_when: true

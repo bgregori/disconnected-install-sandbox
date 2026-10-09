@@ -52,6 +52,10 @@
   changed_when: "'Saved' in bastion_repo_pip_download.stdout"
   when: bastion_repo_enable_kvm | bool
 
+- name: stage container images for the air-gapped hosts
+  ansible.builtin.include_tasks: container_images.yml
+  when: bastion_repo_stage_container_images | bool
+
 - name: create repo metadata
   ansible.builtin.command:
     cmd: "createrepo {{ bastion_repo_base_dir }}/{{ bastion_repo_name }}"

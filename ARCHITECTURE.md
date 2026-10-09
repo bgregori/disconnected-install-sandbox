@@ -137,6 +137,23 @@ disconnected-openshift-aws-sandbox/
 │   │   ├── handlers/main.yml
 │   │   └── meta/main.yml
 │   │
+│   ├── keycloak_idp/                       # Red Hat build of Keycloak as an OIDC issuer
+│   │   ├── tasks/main.yml
+│   │   ├── tasks/prepare.yml               # podman, directories, fapolicyd OCI runtime rules
+│   │   ├── tasks/images.yml                # fetch + podman load the relayed image archives
+│   │   ├── tasks/secrets.yml               # generate-if-absent passwords and client secret
+│   │   ├── tasks/tls.yml                   # issuer CA + serving certificate
+│   │   ├── tasks/realm.yml                 # render the realm import JSON
+│   │   ├── tasks/containers.yml            # Quadlet units, start, firewall
+│   │   ├── tasks/verify.yml                # readiness, discovery document, summary
+│   │   ├── templates/keycloak.network.j2
+│   │   ├── templates/keycloak-postgres.container.j2
+│   │   ├── templates/keycloak.container.j2
+│   │   ├── templates/openshift-realm.json.j2
+│   │   ├── defaults/main.yml
+│   │   ├── handlers/main.yml
+│   │   └── meta/main.yml
+│   │
 │   ├── kvm_host/                           # KVM/libvirt host with OCP node VMs (optional)
 │   │   ├── tasks/main.yml
 │   │   ├── templates/vm-domain.xml.j2
@@ -317,7 +334,7 @@ All security groups are **stateful** — return traffic for allowed inbound rule
 | Egress    | TCP      | 8443       | `10.0.2.20/32`           | Registry HTTPS — oc mirror push   |
 | Egress    | TCP      | 8000       | `10.0.2.30/32`           | Redfish BMC on KVM host (when enabled) |
 
-### 3.2 sg-services (DNS + NTP Host)
+### 3.2 sg-services (DNS + NTP + Keycloak OIDC Host)
 
 | Direction | Protocol | Port(s)    | Source / Destination     | Purpose                           |
 |-----------|----------|------------|--------------------------|-----------------------------------|
@@ -325,6 +342,8 @@ All security groups are **stateful** — return traffic for allowed inbound rule
 | Ingress   | TCP      | 53         | `10.0.0.0/16`            | DNS (TCP) from entire VPC         |
 | Ingress   | UDP      | 53         | `10.0.0.0/16`            | DNS (UDP) from entire VPC         |
 | Ingress   | UDP      | 123        | `10.0.2.0/24`            | NTP from private subnet hosts     |
+| Ingress   | TCP      | 8443       | `10.0.2.0/24`            | Keycloak OIDC issuer from private subnet |
+| Ingress   | TCP      | 8443       | `sg-bastion`             | Keycloak admin console from bastion (public subnet, so not covered above) |
 | Egress    | ALL      | ALL        | `10.0.0.0/16`            | VPC-internal only (NO internet)   |
 
 ### 3.3 sg-registry (Mirror Registry Host)
@@ -579,6 +598,7 @@ Step 2.2: bind_dns role (services host)
   │     ├── api-int.ocp.{{ sandbox_domain }}  → api_vip
   │     ├── *.apps.ocp.{{ sandbox_domain }}   → ingress_vip (default 10.0.2.104)
   │     ├── services.ocp.{{ sandbox_domain }} → 10.0.2.10
+  │     ├── keycloak.ocp.{{ sandbox_domain }} → 10.0.2.10 (OIDC issuer)
   │     ├── registry.ocp.{{ sandbox_domain }} → 10.0.2.20
   │     ├── bastion.ocp.{{ sandbox_domain }}  → 10.0.1.10
   │     ├── kvm.ocp.{{ sandbox_domain }}      → 10.0.2.30
@@ -664,6 +684,38 @@ Step 2.8: rhel_hardening role — STIG pass (private hosts FIRST, then bastion)
       entries including from /etc/sudoers.d/. The remediation and sudo
       restoration must run in a single shell command (as root) to prevent
       Ansible lockout.
+
+Step 2.8.1: keycloak_idp role (services host)
+  ├── Install podman from bastion-local repo; assert >= 4.4 (Quadlet)
+  ├── Write /etc/fapolicyd/rules.d/25-oci-runtime.rules + fagenrules --load
+  │     fapolicyd does not support containers; without this the OCI runtime
+  │     cannot load its own shared libraries and every container start dies.
+  ├── Fetch rhbk-keycloak.tar + rhbk-postgres.tar from the bastion repo over
+  │     HTTP and podman load them
+  ├── Generate passwords and the OIDC client secret if absent, 0600 root
+  ├── Generate a private CA + serving certificate for keycloak.ocp.<domain>
+  │     (RSA 3072 / SHA-256; the CA cert is what the cluster consumes)
+  ├── Render the openshift realm: admin + user1..user5, group cluster-admins
+  │     with user1, CONFIGURE_TOTP as a default required action, pbkdf2-sha512
+  │     password policy, and a confidential OIDC client with claim mappers for
+  │     preferred_username / email / name / groups
+  ├── Deploy Quadlet units (keycloak.network, keycloak-postgres.container,
+  │     keycloak.container), daemon-reload, start PostgreSQL, wait for
+  │     pg_isready, start Keycloak with `start --import-realm`
+  ├── Open 8443/tcp in firewalld
+  └── VALIDATION: GET /health/ready on loopback :9000, then the OIDC discovery
+      document over HTTPS validated against the generated CA
+
+      ORDERING NOTE: after the private-host STIG pass, before the bastion's.
+      After, so the IdP is stood up on the hardened host it has to live on
+      (fapolicyd, SELinux enforcing, firewalld closed) rather than being
+      configured first and broken by the STIG reboot. Before the bastion's,
+      because the container images arrive over HTTP from the bastion repo and
+      STIG's httpd remediation can take that repo down.
+
+      IMPORT NOTE: `--import-realm` is create-once — RHBK skips a realm that
+      already exists and there is no override for the startup path. Editing
+      the realm template and re-running changes only the file on disk.
 ```
 
 ### 4.4 Ansible Connection Model
