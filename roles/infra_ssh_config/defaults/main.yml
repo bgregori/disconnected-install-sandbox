@@ -6,3 +6,8 @@ infra_ssh_config_file: "~/.ssh/config.d/disconnected-sandbox"
 # Sandbox hosts reuse static private IPs across reprovisions, so their host keys
 # change every time. Keep them out of the operator's real known_hosts.
 infra_ssh_config_known_hosts: "{{ sandbox_known_hosts }}"
+
+# Load the provisioned key into the operator's ssh-agent. The bastion reaches
+# the private hosts through a forwarded agent, so an agent holding only a
+# superseded key fails that hop while plain ssh keeps working.
+infra_ssh_config_manage_agent: true
