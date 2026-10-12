@@ -38,10 +38,25 @@
   when: item.0.rc != 0 or item.1 is changed
   changed_when: true
 
-- name: confirm both images are in podman storage
+- name: re-check podman storage after loading
   ansible.builtin.command:
     cmd: "podman image exists {{ item.image }}"
   loop: "{{ keycloak_idp_image_archives }}"
   loop_control:
     label: "{{ item.image }}"
+  register: keycloak_idp_image_final
   changed_when: false
+  failed_when: false
+
+- name: assert both images are in podman storage
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+    fail_msg: >-
+      {{ item.item.image }} is still missing from podman storage after loading
+      {{ item.item.archive }}. Check that the bastion saved the archive under
+      the name the image expects.
+    success_msg: "{{ item.item.image }} is in podman storage"
+  loop: "{{ keycloak_idp_image_final.results }}"
+  loop_control:
+    label: "{{ item.item.image }}"

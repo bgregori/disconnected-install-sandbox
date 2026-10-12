@@ -78,7 +78,11 @@ keycloak_idp_tls_san:
   - "DNS:{{ keycloak_idp_hostname }}"
   - "DNS:services.{{ cluster_domain }}"
   - "DNS:services"
-  - "IP:{{ services_private_ip }}"
+  - "IP:{{ keycloak_idp_bind_ip }}"
+
+# The address the issuer listens on. Not 0.0.0.0 -- the management port is
+# published separately on loopback and must not follow this one out.
+keycloak_idp_bind_ip: "{{ services_private_ip }}"
 
 # Container and systemd naming. A .container Quadlet file called foo.container
 # generates foo.service, which is why these two are spelled the way they are.

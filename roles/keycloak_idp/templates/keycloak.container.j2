@@ -14,7 +14,7 @@ Network={{ keycloak_idp_network }}.network
 # Bound to the private address, not 0.0.0.0. The management interface --
 # /health and /metrics, on its own port since RHBK 26 -- is on loopback only
 # and never leaves the host.
-PublishPort={{ services_private_ip }}:{{ keycloak_idp_port }}:{{ keycloak_idp_port }}
+PublishPort={{ keycloak_idp_bind_ip }}:{{ keycloak_idp_port }}:{{ keycloak_idp_port }}
 PublishPort=127.0.0.1:{{ keycloak_idp_management_port }}:{{ keycloak_idp_management_port }}
 
 # Read-only, and :Z so each gets this container's private SELinux label.

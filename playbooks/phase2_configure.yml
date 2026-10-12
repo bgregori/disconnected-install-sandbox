@@ -321,10 +321,14 @@
   roles:
     - role: rhel_hardening
       rhel_hardening_enable_fips: false
+      # The keycloak issuer port is deliberately NOT here. keycloak_idp opens
+      # it itself, so the role works when run on its own rather than only as
+      # part of a full phase 2. These lists only ever add ports -- nothing
+      # closes one -- so leaving it to the role costs nothing.
       rhel_hardening_firewall_ports: >-
         {{ (['8443/tcp'] if 'role_registry' in group_names else [])
          + (['8888/tcp', '8000/tcp'] if 'role_kvm' in group_names else [])
-         + (['53/tcp', '53/udp', '123/udp', keycloak_port ~ '/tcp']
+         + (['53/tcp', '53/udp', '123/udp']
             if 'role_services' in group_names else []) }}
 
 # Step 2.9: Re-apply KVM networking after STIG reboot

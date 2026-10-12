@@ -1,7 +1,19 @@
 ---
-- name: install podman from the bastion local repo
+# python3-cryptography is community.crypto's backend. tls.yml builds the
+# issuer CA and the serving certificate with openssl_privatekey, openssl_csr
+# and x509_certificate, all of which import it on the TARGET host -- and the
+# RHEL 9 image does not ship it. Installing it here rather than discovering
+# the gap in tls.yml, which fails after this role has already written
+# directories and fapolicyd rules.
+#
+# podman is usually already present from the base image, but it is named
+# anyway so a host without it is served from the bastion repo rather than
+# failing at the first container. bastion_repo mirrors both packages.
+- name: install container and crypto tooling from the bastion local repo
   ansible.builtin.dnf:
-    name: podman
+    name:
+      - podman
+      - python3-cryptography
     state: present
 
 # Quadlet -- systemd units generated from .container files -- arrived in
