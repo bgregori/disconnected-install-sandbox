@@ -127,6 +127,20 @@ yamllint .
 - Private subnet egress rules must NEVER include `0.0.0.0/0` as destination.
 - Validate air-gap: assert private route table has no default route after provisioning.
 
+### Storage Rules
+
+- NEVER write a device path to `/etc/fstab`. AWS assigns NVMe names in attach order at boot, so they move
+  across reboots — the volume that is `/dev/nvme1n1` when a play formats it can be `/dev/nvme0n1` after the
+  STIG reboot, and that is usually the root disk.
+- Detect the device to decide what to format, then resolve its UUID after `community.general.filesystem`
+  runs and mount with `src: "UUID=..."`. The device path must not outlive the play that found it.
+- Resolve UUIDs with `blkid -c /dev/null -s UUID -o value <dev>`. `-c /dev/null` bypasses the blkid cache,
+  so a filesystem created one task earlier is probed off the device instead of read from a stale entry.
+- Assert the UUID is non-empty before mounting. An empty one writes a bare `UUID=` that fails at boot.
+- Data volumes mount `nofail`, so a detached or misnamed volume cannot wedge the boot — which also means it
+  fails silently. Every `nofail` mount needs a matching check in `playbooks/validate.yml`: mounted at all,
+  backed by the data volume rather than the root disk, and pinned in fstab by UUID.
+
 ### Git Practices
 
 - Conventional commit messages: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`.
