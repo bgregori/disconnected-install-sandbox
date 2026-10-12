@@ -333,15 +333,46 @@
             state: absent
 
     # Step 8: Clean up local files
+    #
+    # The agent entry has to go BEFORE the key files: `ssh-add -d` reads
+    # <key>.pub to work out which identity to drop, so once the files are
+    # gone the entry can only be cleared with `ssh-add -D`, which would take
+    # the operator's unrelated keys with it. Removing it here is the only
+    # moment that is both precise and possible.
+    - name: drop the key from the ssh agent
+      ansible.builtin.command:
+        cmd: ssh-add -d {{ ssh_key_path | expanduser }}
+      environment:
+        SSH_AUTH_SOCK: "{{ lookup('ansible.builtin.env', 'SSH_AUTH_SOCK') }}"
+      delegate_to: localhost
+      become: false
+      register: teardown_agent_drop
+      changed_when: teardown_agent_drop.rc == 0
+      failed_when: false
+      when: lookup('ansible.builtin.env', 'SSH_AUTH_SOCK') | length > 0
+
+    # Keeping the key pair is what makes repeated rebuilds idempotent: the
+    # next provision reuses it rather than minting a new fingerprint that
+    # invalidates every cached copy. See sandbox_preserve_ssh_key in
+    # group_vars/all.yml.
     - name: remove local ssh private key
       ansible.builtin.file:
         path: "{{ ssh_key_path }}"
         state: absent
+      when: not (sandbox_preserve_ssh_key | default(true) | bool)
 
     - name: remove local ssh public key
       ansible.builtin.file:
         path: "{{ ssh_key_path }}.pub"
         state: absent
+      when: not (sandbox_preserve_ssh_key | default(true) | bool)
+
+    - name: report the preserved key
+      ansible.builtin.debug:
+        msg: >-
+          Kept {{ ssh_key_path }} so the next provision reuses it.
+          Run teardown with -e sandbox_preserve_ssh_key=false to delete it.
+      when: sandbox_preserve_ssh_key | default(true) | bool
 
     - name: remove ssh config stanza
       ansible.builtin.file:

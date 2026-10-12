@@ -24,6 +24,24 @@ project_tag: disconnected-sandbox
 ssh_key_name: "{{ project_tag }}-key"
 ssh_key_path: "~/.ssh/{{ project_tag }}.pem"
 
+# Keep the local key pair when tearing down, so the next provision reuses it.
+#
+# infra_ec2 generates the key with community.crypto.openssh_keypair, which is
+# already idempotent -- it only writes when the file is missing. So the ONLY
+# reason a rebuild produces a new key is that teardown deleted the old one,
+# and a new key means every cached copy of the old one is now wrong: the
+# ssh-agent entry most of all, which breaks `ssh -A` hops with "Permission
+# denied (publickey)" while direct ssh still works, because the ssh config
+# reads the new file from disk.
+#
+# Preserving it makes the fingerprint stable across rebuilds, which is what
+# you want when you reprovision the same demo system repeatedly. Host keys
+# still rotate -- those legitimately change -- and sandbox_known_hosts keeps
+# that churn out of the operator's real known_hosts.
+#
+# Set false to delete the key on teardown, as earlier versions always did.
+sandbox_preserve_ssh_key: true
+
 # Sandbox-scoped known_hosts. The private IPs below are static and recycled
 # on every rebuild, so sandbox host keys are kept out of the operator's real
 # ~/.ssh/known_hosts. Used by group_vars/private_hosts.yml (the ProxyCommand

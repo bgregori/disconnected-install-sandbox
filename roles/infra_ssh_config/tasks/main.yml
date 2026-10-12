@@ -28,6 +28,67 @@
     mode: "0600"
   become: false
 
+- name: look for an ssh agent
+  ansible.builtin.set_fact:
+    infra_ssh_config_agent_sock: "{{ lookup('ansible.builtin.env', 'SSH_AUTH_SOCK') }}"
+  when: infra_ssh_config_manage_agent | bool
+
+# Adding is enough and is safe: ssh offers every loaded key, so a leftover
+# entry from a previous sandbox does not stop the new one authenticating.
+# Deliberately NOT `ssh-add -D` first -- that would drop unrelated keys the
+# operator is relying on. Teardown removes its own entry while the key file
+# still exists, which is the only moment ssh-add can identify it.
+- name: load the key into the ssh agent
+  ansible.builtin.shell: |
+    set -o pipefail
+    key="{{ infra_ssh_config_key_path | expanduser }}"
+    want=$(ssh-keygen -lf "${key}" | awk '{print $2}')
+    if ssh-add -l 2>/dev/null | grep -qF "${want}"; then
+      echo "already-loaded"
+      exit 0
+    fi
+    ssh-add "${key}" >/dev/null 2>&1 && echo "added" || echo "add-failed"
+  args:
+    executable: /bin/bash
+  environment:
+    SSH_AUTH_SOCK: "{{ infra_ssh_config_agent_sock }}"
+  delegate_to: localhost
+  become: false
+  register: infra_ssh_config_agent
+  changed_when: "'added' in infra_ssh_config_agent.stdout"
+  failed_when: false
+  when:
+    - infra_ssh_config_manage_agent | bool
+    - infra_ssh_config_agent_sock | default('') | length > 0
+
+- name: warn about superseded agent entries for this key
+  ansible.builtin.shell: |
+    set -o pipefail
+    key="{{ infra_ssh_config_key_path | expanduser }}"
+    want=$(ssh-keygen -lf "${key}" | awk '{print $2}')
+    ssh-add -l 2>/dev/null | grep -F "${key}" | grep -vF "${want}" || true
+  args:
+    executable: /bin/bash
+  environment:
+    SSH_AUTH_SOCK: "{{ infra_ssh_config_agent_sock }}"
+  delegate_to: localhost
+  become: false
+  register: infra_ssh_config_agent_stale
+  changed_when: false
+  failed_when: false
+  when:
+    - infra_ssh_config_manage_agent | bool
+    - infra_ssh_config_agent_sock | default('') | length > 0
+
+- name: report superseded agent entries
+  ansible.builtin.debug:
+    msg:
+      - "The agent still holds a superseded key for this path:"
+      - "{{ infra_ssh_config_agent_stale.stdout_lines | default([]) }}"
+      - "Harmless unless they pile up past the server's MaxAuthTries."
+      - "Clear them with: ssh-add -D && ssh-add {{ infra_ssh_config_key_path }}"
+  when: infra_ssh_config_agent_stale.stdout | default('') | length > 0
+
 - name: display connection info
   ansible.builtin.debug:
     msg:
