@@ -1,0 +1,64 @@
+---
+# Creates the root CA on the CONTROLLER. Runs once per play regardless of how
+# many hosts the role is applied to.
+#
+# community.crypto needs the cryptography library wherever it executes, which
+# is why every task here is delegated to localhost: ansible's own interpreter
+# has it, the air-gapped hosts need no extra package, and the CA private key
+# never touches a sandbox host.
+
+- name: create the local pki directory
+  ansible.builtin.file:
+    path: "{{ pki_ca_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+# Idempotent by nature: openssl_privatekey only writes when the file is
+# missing. That is what makes the CA stable across rebuilds -- teardown is the
+# only thing that can remove it, and it preserves this by default.
+- name: generate the root ca private key
+  community.crypto.openssl_privatekey:
+    path: "{{ pki_ca_key_path }}"
+    type: RSA
+    size: "{{ pki_key_size }}"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+- name: generate the root ca signing request
+  community.crypto.openssl_csr:
+    path: "{{ pki_ca_csr_path }}"
+    privatekey_path: "{{ pki_ca_key_path }}"
+    common_name: "{{ pki_ca_common_name }}"
+    basic_constraints:
+      - "CA:TRUE"
+    basic_constraints_critical: true
+    key_usage:
+      - keyCertSign
+      - cRLSign
+    key_usage_critical: true
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+
+- name: generate the root ca certificate
+  community.crypto.x509_certificate:
+    path: "{{ pki_ca_cert_path }}"
+    csr_path: "{{ pki_ca_csr_path }}"
+    privatekey_path: "{{ pki_ca_key_path }}"
+    provider: selfsigned
+    selfsigned_not_after: "{{ pki_ca_validity }}"
+    selfsigned_digest: "{{ pki_digest }}"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+  register: pki_ca_result
+
+- name: report the ca in use
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'Created' if pki_ca_result is changed else 'Reusing' }} root CA
+      '{{ pki_ca_common_name }}' at {{ pki_ca_cert_path }}
+  run_once: true

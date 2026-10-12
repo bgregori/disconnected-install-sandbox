@@ -1,0 +1,46 @@
+---
+# Installs the root CA into this host's trust store. Deliberately cheap and
+# dependency-free: a file copy and update-ca-trust, both of which work on a
+# base RHEL image with no packages from the air-gapped repo. That matters
+# because this has to run BEFORE the bastion repo is switched to HTTPS --
+# a host cannot install packages over a connection it does not yet trust.
+
+- name: install the root ca as a system trust anchor
+  ansible.builtin.copy:
+    src: "{{ pki_ca_cert_path }}"
+    dest: "{{ pki_trust_anchor_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: pki_trust_anchor
+
+# Anchors are only source material; update-ca-trust compiles them into the
+# bundles openssl, curl, python and podman actually read. Skipping this
+# leaves the file in place and trusted by nothing.
+- name: rebuild the system trust bundle # noqa: no-handler
+  ansible.builtin.command:
+    cmd: update-ca-trust extract
+  when: pki_trust_anchor is changed
+  changed_when: true
+
+# Proves the anchor took, rather than assuming the copy was enough. openssl
+# reads the compiled bundle, so a failure here means update-ca-trust did not
+# do what the previous task thinks it did.
+- name: verify the root ca is in the compiled trust bundle
+  ansible.builtin.command:
+    cmd: openssl verify -CAfile /etc/pki/tls/certs/ca-bundle.crt {{ pki_trust_anchor_path }}
+  register: pki_trust_verify
+  changed_when: false
+  failed_when: false
+
+- name: assert the root ca is trusted
+  ansible.builtin.assert:
+    that:
+      - pki_trust_verify.rc == 0
+    fail_msg: >-
+      {{ pki_trust_anchor_path }} is not in the compiled trust bundle on
+      {{ inventory_hostname }}: {{ pki_trust_verify.stdout | default('') | trim }}
+      {{ pki_trust_verify.stderr | default('') | trim }}.
+      Every TLS endpoint in the sandbox chains to this root, so nothing that
+      follows will verify until it is.
+    success_msg: "root CA trusted on {{ inventory_hostname }}"

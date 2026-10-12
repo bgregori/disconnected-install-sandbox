@@ -1,0 +1,14 @@
+---
+# Entry point: make sure the environment CA exists, then trust it on this
+# host. Safe to apply to every host -- the CA itself is created once on the
+# controller and the rest is a file copy plus update-ca-trust.
+#
+# To issue a certificate, include tasks_from: issue.yml instead. See the
+# header there for the contract.
+
+- name: ensure the environment ca exists
+  ansible.builtin.include_tasks: ca.yml
+  run_once: true
+
+- name: trust the environment ca on this host
+  ansible.builtin.include_tasks: trust.yml

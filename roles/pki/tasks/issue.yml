@@ -1,0 +1,117 @@
+---
+# Issues one leaf certificate signed by the environment root CA.
+#
+# CONTRACT -- the caller sets these before including:
+#   pki_issue_name         short basename, e.g. "keycloak". Produces
+#                          <pki_issue_dir>/<name>.crt and .key
+#   pki_issue_common_name  certificate CN
+#   pki_issue_sans         list of SANs in openssl form, e.g.
+#                          ["DNS:host.example.com", "IP:10.0.2.10"]
+#   pki_issue_dir          directory on the TARGET host for the cert and key
+# optional:
+#   pki_issue_owner/group  default root:root
+#   pki_issue_key_mode     default 0600
+#
+# The private key is generated on the target host and never leaves it. Only
+# the CSR travels to the controller to be signed, and only the certificate
+# comes back. That is the whole reason this is a four-step dance rather than
+# generating both ends on the controller and copying them over.
+
+- name: assert the issue contract is satisfied
+  ansible.builtin.assert:
+    that:
+      - pki_issue_name | default('') | length > 0
+      - pki_issue_common_name | default('') | length > 0
+      - pki_issue_dir | default('') | length > 0
+      - pki_issue_sans | default([]) | length > 0
+    fail_msg: >-
+      pki issue.yml needs pki_issue_name, pki_issue_common_name,
+      pki_issue_dir and pki_issue_sans. See the contract at the top of
+      roles/pki/tasks/issue.yml.
+    quiet: true
+
+- name: create the certificate directory
+  ansible.builtin.file:
+    path: "{{ pki_issue_dir }}"
+    state: directory
+    owner: "{{ pki_issue_owner | default('root') }}"
+    group: "{{ pki_issue_group | default('root') }}"
+    mode: "0750"
+
+- name: generate the leaf private key on the host
+  community.crypto.openssl_privatekey:
+    path: "{{ pki_issue_dir }}/{{ pki_issue_name }}.key"
+    type: RSA
+    size: "{{ pki_key_size }}"
+    owner: "{{ pki_issue_owner | default('root') }}"
+    group: "{{ pki_issue_group | default('root') }}"
+    mode: "{{ pki_issue_key_mode | default('0600') }}"
+
+- name: generate the signing request on the host
+  community.crypto.openssl_csr:
+    path: "{{ pki_issue_dir }}/{{ pki_issue_name }}.csr"
+    privatekey_path: "{{ pki_issue_dir }}/{{ pki_issue_name }}.key"
+    common_name: "{{ pki_issue_common_name }}"
+    subject_alt_name: "{{ pki_issue_sans }}"
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    extended_key_usage:
+      - serverAuth
+    owner: "{{ pki_issue_owner | default('root') }}"
+    group: "{{ pki_issue_group | default('root') }}"
+    mode: "0644"
+  register: pki_issue_csr
+
+- name: read the signing request
+  ansible.builtin.slurp:
+    src: "{{ pki_issue_dir }}/{{ pki_issue_name }}.csr"
+  register: pki_issue_csr_content
+
+# Staged under the CA directory so signing has a local file to work from.
+# Named per host as well as per cert, because two hosts can legitimately ask
+# for the same service name.
+- name: stage the signing request on the controller
+  ansible.builtin.copy:
+    content: "{{ pki_issue_csr_content.content | b64decode }}"
+    dest: "{{ pki_ca_dir }}/{{ inventory_hostname }}-{{ pki_issue_name }}.csr"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: sign the certificate with the root ca
+  community.crypto.x509_certificate:
+    path: "{{ pki_ca_dir }}/{{ inventory_hostname }}-{{ pki_issue_name }}.crt"
+    csr_path: "{{ pki_ca_dir }}/{{ inventory_hostname }}-{{ pki_issue_name }}.csr"
+    provider: ownca
+    ownca_path: "{{ pki_ca_cert_path }}"
+    ownca_privatekey_path: "{{ pki_ca_key_path }}"
+    ownca_not_after: "{{ pki_cert_validity }}"
+    ownca_digest: "{{ pki_digest }}"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+  register: pki_issue_signed
+
+- name: install the signed certificate on the host
+  ansible.builtin.copy:
+    src: "{{ pki_ca_dir }}/{{ inventory_hostname }}-{{ pki_issue_name }}.crt"
+    dest: "{{ pki_issue_dir }}/{{ pki_issue_name }}.crt"
+    owner: "{{ pki_issue_owner | default('root') }}"
+    group: "{{ pki_issue_group | default('root') }}"
+    mode: "0644"
+  register: pki_issue_installed
+
+# Catches the mismatch that silently breaks TLS: a certificate that does not
+# correspond to the key sitting next to it, which happens if one of the two
+# is regenerated without the other.
+- name: verify the certificate matches the private key
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      c=$(openssl x509 -noout -pubkey -in {{ pki_issue_dir }}/{{ pki_issue_name }}.crt | openssl md5)
+      k=$(openssl pkey -pubout -in {{ pki_issue_dir }}/{{ pki_issue_name }}.key | openssl md5)
+      test "$c" = "$k"
+    executable: /bin/bash
+  changed_when: false

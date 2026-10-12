@@ -272,6 +272,24 @@ rhel_hardening_enable_fips: true
 rhel_hardening_apply_stig: true
 rhel_hardening_stig_profile: xccdf_org.ssgproject.content_profile_stig
 
+# Environment PKI
+# ---------------------------------------------------------------------------
+# One root CA for every TLS endpoint in the sandbox. Lives on the CONTROLLER,
+# not on a sandbox host: hosts generate their own leaf keys and send a CSR to
+# be signed, so nothing here needs the CA private key.
+#
+# artifacts/ is gitignored. Preserved across rebuilds for the same reason the
+# SSH key is -- a stable root means anything taught to trust this sandbox
+# once keeps working after a reprovision.
+#
+# Anchored to inventory_dir, NOT playbook_dir: playbook_dir follows whichever
+# playbook is running, so a root of trust would move depending on how you
+# invoked ansible. ansible.cfg pins the inventory to this repo, so this
+# always resolves to <repo>/artifacts/pki.
+sandbox_pki_dir: "{{ inventory_dir }}/../artifacts/pki"
+sandbox_ca_cert_path: /etc/pki/ca-trust/source/anchors/sandbox-ca.crt
+sandbox_preserve_ca: true
+
 # Derived - used throughout roles and templates
 cluster_domain: "{{ cluster_name }}.{{ sandbox_domain }}"
 

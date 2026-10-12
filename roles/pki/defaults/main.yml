@@ -1,0 +1,35 @@
+---
+# One certificate authority for the whole sandbox, so every TLS endpoint
+# chains to a root that every host and the cluster already trust. Before this
+# the environment had two unrelated private CAs (Keycloak's and the
+# registry's) and two plaintext services, and every consumer needed its own
+# bespoke trust step.
+
+# The CA lives on the CONTROLLER, not on a sandbox host. Nothing in the
+# sandbox needs the CA private key -- hosts generate their own leaf keys and
+# send a CSR to be signed -- so there is no reason to put it somewhere a
+# compromised sandbox host could read it.
+pki_ca_dir: "{{ sandbox_pki_dir }}"
+pki_ca_key_path: "{{ pki_ca_dir }}/sandbox-ca.key"
+pki_ca_csr_path: "{{ pki_ca_dir }}/sandbox-ca.csr"
+pki_ca_cert_path: "{{ pki_ca_dir }}/sandbox-ca.crt"
+
+# Preserved across rebuilds by default, for the same reason the SSH key is:
+# a stable root means anything you taught to trust this sandbox once stays
+# working after a reprovision. Set false to get a fresh CA each build.
+pki_preserve_ca: "{{ sandbox_preserve_ca }}"
+
+pki_ca_common_name: "Disconnected Sandbox Root CA"
+pki_ca_validity: "+3650d"
+
+# RSA and SHA-256 are both FIPS 140-3 approved. RSA rather than EC avoids any
+# question about which curves the host crypto policy still offers once
+# fips-mode-setup has run. 3072 bits clears the 2048-bit floor that RHBK's
+# strict FIPS mode imposes, with room to spare.
+pki_key_size: 3072
+pki_digest: sha256
+pki_cert_validity: "+825d"
+
+# Where the root lands in each host's trust store. update-ca-trust compiles
+# anchors into the bundles that openssl, curl, python and podman all read.
+pki_trust_anchor_path: "{{ sandbox_ca_cert_path }}"
