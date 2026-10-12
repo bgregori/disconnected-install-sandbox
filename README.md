@@ -36,20 +36,22 @@ Ansible playbooks that provision an isolated AWS sandbox simulating a **disconne
 
 **KVM bare metal simulation (optional, default: enabled):** An m5.metal EC2 instance runs libvirt/KVM with the OCP node VMs for the selected [cluster topology](#cluster-topology), using bridge networking with proxy ARP — VMs appear as real hosts on the private subnet. sushy-emulator provides a Redfish BMC API, enabling the **OpenShift Agent-Based Installer (ABI)** — the standard method for disconnected bare metal deployments. Toggle with `enable_kvm_host: false` to skip (environment works the same as before, with OCP nodes deferred to the IPI installer).
 
-**OIDC identity provider:** The services host also runs the Red Hat build of Keycloak
-(RHBK) with a PostgreSQL backing store, both as podman containers managed by Quadlet, serving
-an issuer at `https://keycloak.ocp.{sandbox_domain}:8443/realms/openshift` for a cluster to
-federate to. The images cannot be pulled on an air-gapped host, so the bastion pulls them and
-`podman save`s them into the same httpd document root that already serves the yum repo. That
-pull needs Red Hat registry credentials:
+**OIDC identity provider (optional, default: disabled):** The services host can run the Red Hat
+build of Keycloak (RHBK) with a PostgreSQL backing store, both as podman containers managed by
+Quadlet, serving an issuer at `https://keycloak.ocp.{sandbox_domain}:8443/realms/openshift` for a
+cluster to federate to. Opt in with `-e enable_keycloak_idp=true`, which adds both the image
+staging and the role. The images cannot be pulled on an air-gapped host, so the bastion pulls them
+and `podman save`s them into the same httpd document root that already serves the yum repo. That
+pull needs Red Hat registry credentials, which is why the IdP is off by default:
 
 ```bash
 ansible-playbook playbooks/phase2_configure.yml -i inventory/aws_ec2.yml \
+  -e sandbox_domain=example.com \
+  -e enable_keycloak_idp=true \
   -e bastion_repo_registry_auth_file=~/pull-secret.json
 ```
 
-Without it Phase 2 fails fast with an explanatory message. Skip the IdP entirely with
-`-e enable_keycloak_idp=false`, which drops both the image staging and the role. See
+Without those credentials Phase 2 fails fast with an explanatory message. See
 `roles/keycloak_idp/defaults/main.yml` for what the role does and does not do about FIPS,
 and for Red Hat's support posture on running RHBK under podman.
 

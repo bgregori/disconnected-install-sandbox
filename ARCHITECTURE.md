@@ -875,6 +875,12 @@ inventory/group_vars/all.yml          # Lowest precedence — global defaults
   ├── kvm_reserved_memory_mb: 16384       # held back from VMs for the hypervisor
   ├── redfish_port: 8000
   │
+  │ OIDC IDENTITY PROVIDER (optional):
+  ├── enable_keycloak_idp: false          # Off by default — needs registry credentials
+  ├── keycloak_port: 8443
+  ├── keycloak_realm: openshift
+  ├── keycloak_hostname: keycloak.{{ cluster_domain }}
+  │
   │ HARDENING:
   ├── rhel_hardening_enable_fips: true
   ├── rhel_hardening_apply_stig: true

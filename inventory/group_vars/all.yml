@@ -207,9 +207,11 @@ bastion_repo_container_dir_name: container-images
 # nothing proxies it. The issuer a cluster federates to is
 # https://keycloak.{{ cluster_domain }}:{{ keycloak_port }}/realms/{{ keycloak_realm }}
 #
-# Turning this off also stops the bastion pulling and staging the container
-# images, which is the part that needs Red Hat registry credentials.
-enable_keycloak_idp: true
+# Off by default -- opt in with -e enable_keycloak_idp=true. Standing the IdP
+# up also makes the bastion pull and stage the container images, and that is
+# the step needing Red Hat registry credentials, so a sandbox that does not
+# want an issuer is not made to supply them.
+enable_keycloak_idp: false
 keycloak_port: 8443
 keycloak_realm: openshift
 keycloak_hostname: "keycloak.{{ cluster_domain }}"
