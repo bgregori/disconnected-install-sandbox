@@ -35,6 +35,11 @@ These have NO defaults — playbooks fail fast if not provided:
 | `sandbox_domain` | Your Route53 hosted zone | `example.com` |
 | `admin_cidr` | Operator's public IP | `203.0.113.42/32` |
 
+`sandbox_domain` is needed by EVERY phase, not just Phase 1 — `cluster_domain` derives from it, and
+`bind_dns`, `common_client`, `ocp_node_prep` and the DNS checks in `validate.yml` all read that. Omit
+it from a Phase 2 or validate run and the run dies partway through on `'sandbox_domain' is undefined`,
+after the earlier plays have already made changes.
+
 AWS credentials MUST be exported as environment variables (never in playbooks):
 ```bash
 export AWS_ACCESS_KEY_ID="AKIA..."
@@ -73,10 +78,12 @@ ansible-playbook playbooks/phase1_provision.yml \
   -e admin_cidr=$(curl -s ifconfig.me)/32
 
 # Phase 2 only: configure RHEL services (requires Phase 1 complete)
-ansible-playbook playbooks/phase2_configure.yml -i inventory/aws_ec2.yml
+ansible-playbook playbooks/phase2_configure.yml -i inventory/aws_ec2.yml \
+  -e sandbox_domain=example.com
 
 # Validate all services
-ansible-playbook playbooks/validate.yml -i inventory/aws_ec2.yml
+ansible-playbook playbooks/validate.yml -i inventory/aws_ec2.yml \
+  -e sandbox_domain=example.com
 
 # Teardown everything
 ansible-playbook playbooks/teardown.yml \
