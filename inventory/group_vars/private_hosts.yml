@@ -27,6 +27,12 @@
 #     Rebuilt sandboxes also recycle the static private IPs with fresh keys.
 #     Both are expected here; sandbox_known_hosts keeps the blast radius off
 #     the operator's real known_hosts.
+#
+#     Note StrictHostKeyChecking=no only covers a new or recycled key. On a
+#     CHANGED one ssh logs in but refuses to forward ("forwarding disabled due
+#     to host key check failure"), which kills a `ssh -W` ProxyCommand just as
+#     dead. phase2_configure.yml purges sandbox_known_hosts around the FIPS
+#     reboots so this hop never meets a changed bastion key.
 ansible_ssh_common_args: >-
   -o ProxyCommand="ssh -W %h:%p -i {{ ssh_key_path }}
   -o UserKnownHostsFile={{ sandbox_known_hosts }}

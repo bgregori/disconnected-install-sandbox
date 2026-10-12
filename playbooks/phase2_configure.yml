@@ -129,6 +129,29 @@
     - role: rhel_hardening
       rhel_hardening_apply_stig: false
 
+# The bastion came back from its FIPS reboot presenting ecdsa instead of the
+# ed25519 key recorded before it, so its known_hosts entry is now a CHANGED
+# key. StrictHostKeyChecking=no is not enough to ride that out: ssh still
+# completes the login, but it refuses to set up any forwarding --
+#
+#   Error: forwarding disabled due to host key check failure
+#   Connection closed by UNKNOWN port 65535
+#
+# -- and the ProxyCommand below is `ssh -W`, which is forwarding. So every
+# tunnel to a private host dies at the jump hop until the stale bastion key is
+# gone. Purge it here, before anything tries to tunnel; the play after the
+# private-host reboots purges again for the keys those reboots invalidate.
+- name: discard the pre-fips bastion host key
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: remove stale sandbox known_hosts
+      ansible.builtin.file:
+        path: "{{ sandbox_known_hosts }}"
+        state: absent
+
 - name: enable fips on private hosts
   hosts: role_services:role_registry:role_kvm
   gather_facts: false
@@ -158,8 +181,9 @@
 # every key recorded before this point is stale and ssh reads the change as
 # REMOTE HOST IDENTIFICATION HAS CHANGED.
 #
-# The playbook itself tolerates that (StrictHostKeyChecking=no, matching
-# ansible.cfg), but the ~/.ssh/config.d/disconnected-sandbox stanzas written
+# The playbook's own connections tolerate that (StrictHostKeyChecking=no,
+# matching ansible.cfg -- these hops do no forwarding, unlike the bastion hop
+# handled above), but the ~/.ssh/config.d/disconnected-sandbox stanzas written
 # by infra_ssh_config use accept-new, which refuses a changed key -- so
 # `ssh bastion-sandbox` by hand would fail after a run that otherwise worked.
 #
