@@ -1,7 +1,23 @@
-Listen {{ bastion_repo_port }}
+{{ ansible_managed | comment }}
+Listen {{ bastion_repo_port }}{% if bastion_repo_tls | bool %} https{% endif %}
+
 
 <VirtualHost *:{{ bastion_repo_port }}>
     DocumentRoot "{{ bastion_repo_base_dir }}"
+{% if bastion_repo_tls | bool %}
+
+    # Served over TLS with a certificate from the environment CA. The private
+    # hosts reach this repo before bind_dns exists, so they connect by IP and
+    # the certificate carries an IP SAN rather than relying on a name.
+    #
+    # The RPMs here are installed with gpgcheck disabled, so this connection
+    # is the only integrity control on them.
+    SSLEngine on
+    SSLCertificateFile {{ bastion_repo_tls_cert }}
+    SSLCertificateKeyFile {{ bastion_repo_tls_key }}
+    SSLProtocol -all +TLSv1.2 +TLSv1.3
+    SSLHonorCipherOrder off
+{% endif %}
 
     <Directory "{{ bastion_repo_base_dir }}">
         Options Indexes FollowSymLinks

@@ -3,6 +3,13 @@ bastion_repo_port: "{{ bastion_repo_port }}"
 bastion_repo_base_dir: /var/www/html/repos
 bastion_repo_name: rhel9-local
 
+# TLS material for the repo listener, issued by the pki role. The private
+# hosts connect by IP because this repo is in use before bind_dns exists,
+# so the certificate needs an IP SAN -- see tasks/tls.yml.
+bastion_repo_tls_dir: /etc/pki/bastion-repo
+bastion_repo_tls_cert: "{{ bastion_repo_tls_dir }}/repo.crt"
+bastion_repo_tls_key: "{{ bastion_repo_tls_dir }}/repo.key"
+
 bastion_repo_packages:
   - openscap-scanner
   - scap-security-guide

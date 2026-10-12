@@ -1,0 +1,50 @@
+---
+# A certificate for the repo listener, signed by the environment root CA.
+#
+# The SANs matter more than usual here. Every private host configures this
+# repo at step 2.0.1, before bind_dns runs at 2.2, so they have no way to
+# resolve a name and connect to the bastion's private IP. An IP SAN is
+# therefore load-bearing, not belt-and-braces. The names are included so the
+# same certificate keeps working once DNS exists.
+# mod_ssl ships /etc/httpd/conf.d/ssl.conf, which carries `Listen 443 https`
+# and a default vhost. The bastion runs HAProxy on 443 for the OCP apps
+# ingress, and this role runs at step 2.0 while HAProxy is configured at 2.5
+# -- so httpd would claim the port first and HAProxy would fail to bind.
+#
+# Emptying this file is safe: the module itself is loaded from
+# conf.modules.d/00-ssl.conf, which is a separate file this does not touch.
+- name: stop mod_ssl claiming port 443 from haproxy
+  ansible.builtin.copy:
+    content: |
+      # Ansible managed - roles/bastion_repo/tasks/tls.yml
+      # Intentionally empty. The stock ssl.conf listens on 443, which belongs
+      # to HAProxy on this host. The repo's own TLS vhost is in repo.conf and
+      # mod_ssl is still loaded by conf.modules.d/00-ssl.conf.
+    dest: /etc/httpd/conf.d/ssl.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart httpd
+
+- name: issue the repo serving certificate
+  ansible.builtin.include_role:
+    name: pki
+    tasks_from: issue.yml
+  vars:
+    pki_issue_name: repo
+    pki_issue_common_name: "bastion.{{ cluster_domain }}"
+    pki_issue_dir: "{{ bastion_repo_tls_dir }}"
+    pki_issue_owner: root
+    pki_issue_group: root
+    pki_issue_sans:
+      - "IP:{{ bastion_private_ip }}"
+      - "DNS:bastion.{{ cluster_domain }}"
+      - "DNS:bastion"
+
+# httpd reads the key as root at startup, so root-only is correct and no
+# group access is needed.
+- name: restore selinux context on the repo tls material
+  ansible.builtin.command:
+    cmd: restorecon -Rv {{ bastion_repo_tls_dir }}
+  register: bastion_repo_tls_restorecon
+  changed_when: bastion_repo_tls_restorecon.stdout | length > 0

@@ -27,6 +27,20 @@
           registry: registry
           kvm: kvm
 
+# Step 2.0.0: Establish the environment root of trust
+#
+# FIRST, and the ordering is load-bearing. Every TLS endpoint that follows
+# chains to this root, including the bastion package repo -- and a host
+# cannot install packages over a connection it does not yet trust. The role
+# is deliberately dependency-free for exactly this reason: creating the CA
+# happens on the controller, and trusting it is a file copy plus
+# update-ca-trust, both of which work on a base image with no repo at all.
+- name: establish the environment pki
+  hosts: role_bastion:role_services:role_registry:role_kvm
+  gather_facts: false
+  roles:
+    - role: pki
+
 # Step 2.0: Set up bastion as local yum repo + content relay
 - name: configure bastion as package repo
   hosts: role_bastion
@@ -52,7 +66,7 @@
       ansible.builtin.yum_repository:
         name: bastion-local
         description: Bastion Local Repository
-        baseurl: "http://{{ bastion_private_ip }}:{{ bastion_repo_port }}/rhel9-local"
+        baseurl: "{{ bastion_repo_url }}/rhel9-local"
         enabled: true
         gpgcheck: false
 

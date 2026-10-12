@@ -30,6 +30,16 @@
       roles/pki/tasks/issue.yml.
     quiet: true
 
+# issue.yml runs community.crypto ON the target, because that is what keeps
+# the private key on the host that owns it -- so the host needs the library.
+# Deliberately NOT in trust.yml: trusting the CA has to work on a base image
+# with no repository configured yet, and installing anything there would
+# invert the ordering this whole design depends on.
+- name: install the crypto backend needed to generate the key and csr
+  ansible.builtin.dnf:
+    name: python3-cryptography
+    state: present
+
 - name: create the certificate directory
   ansible.builtin.file:
     path: "{{ pki_issue_dir }}"

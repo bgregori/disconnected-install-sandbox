@@ -45,8 +45,7 @@ keycloak_idp_issuer_base_url: "https://{{ keycloak_idp_hostname }}:{{ keycloak_i
 keycloak_idp_image: "{{ keycloak_image }}"
 keycloak_idp_postgres_image: "{{ keycloak_postgres_image }}"
 keycloak_idp_image_archives: "{{ keycloak_image_archives }}"
-keycloak_idp_image_base_url: >-
-  http://{{ bastion_private_ip }}:{{ bastion_repo_port }}/{{ bastion_repo_container_dir_name }}
+keycloak_idp_image_base_url: "{{ bastion_repo_url }}/{{ bastion_repo_container_dir_name }}"
 
 # Rootless service account. Rootful containers do not start on these STIG'd
 # hosts -- see the note at the top of tasks/prepare.yml. ec2-user matches the

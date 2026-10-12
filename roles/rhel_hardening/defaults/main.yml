@@ -19,4 +19,4 @@ rhel_hardening_firewall_ports: []
 rhel_hardening_allow_oci_runtime: true
 
 # Bastion repo for air-gapped package installation
-rhel_hardening_bastion_repo_url: "http://{{ bastion_private_ip }}:{{ bastion_repo_port }}/rhel9-local"
+rhel_hardening_bastion_repo_url: "{{ bastion_repo_url }}/{{ bastion_repo_name | default('rhel9-local') }}"

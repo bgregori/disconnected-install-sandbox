@@ -3,6 +3,10 @@
   ansible.builtin.dnf:
     name:
       - httpd
+      # Only needed when the repo serves TLS, but installing it
+      # unconditionally keeps the package list honest about what this role
+      # can configure, and the bastion has internet so it costs nothing.
+      - mod_ssl
       - createrepo
       - yum-utils
       - tmux
@@ -81,6 +85,10 @@
     regexp: '^Listen 80'
     state: absent
   notify: restart httpd
+
+- name: issue the repo tls certificate
+  ansible.builtin.include_tasks: tls.yml
+  when: bastion_repo_tls | bool
 
 - name: configure httpd to listen on repo port
   ansible.builtin.template:

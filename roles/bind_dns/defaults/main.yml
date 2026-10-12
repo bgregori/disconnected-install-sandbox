@@ -4,7 +4,7 @@ bind_dns_allow_query_cidr: "{{ vpc_cidr }}"
 bind_dns_zone: "{{ cluster_domain }}"
 bind_dns_reverse_zone_private: "2.0.10.in-addr.arpa"
 bind_dns_reverse_zone_public: "1.0.10.in-addr.arpa"
-bind_dns_bastion_repo_url: "http://{{ bastion_private_ip }}:{{ bastion_repo_port }}/rhel9-local"
+bind_dns_bastion_repo_url: "{{ bastion_repo_url }}/rhel9-local"
 
 bind_dns_records:
   - name: api
