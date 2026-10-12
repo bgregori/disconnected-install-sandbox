@@ -1,0 +1,47 @@
+---
+# The services host has no internet and no registry credentials. The images
+# were pulled on the bastion and `podman save`d into the same httpd document
+# root that already serves the local yum repo, so getting them here is a
+# plain HTTP fetch over the one path out of the private subnet that exists.
+
+- name: download the container image archives from the bastion
+  ansible.builtin.get_url:
+    url: "{{ keycloak_idp_image_base_url }}/{{ item.archive }}"
+    dest: "{{ keycloak_idp_image_dir }}/{{ item.archive }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ keycloak_idp_image_archives }}"
+  loop_control:
+    label: "{{ item.archive }}"
+  register: keycloak_idp_image_download
+
+- name: check which images are already in podman storage
+  ansible.builtin.command:
+    cmd: "podman image exists {{ item.image }}"
+  loop: "{{ keycloak_idp_image_archives }}"
+  loop_control:
+    label: "{{ item.image }}"
+  register: keycloak_idp_image_present
+  changed_when: false
+  failed_when: false
+
+# Two reasons to load: the image is not in storage yet, or the bastion served
+# a newer archive under the same name. item.0 is the existence check, item.1
+# the download -- zipped so both verdicts are available in one condition.
+- name: load the images into podman storage
+  ansible.builtin.command:
+    cmd: "podman load --input {{ keycloak_idp_image_dir }}/{{ item.1.item.archive }}"
+  loop: "{{ keycloak_idp_image_present.results | zip(keycloak_idp_image_download.results) | list }}"
+  loop_control:
+    label: "{{ item.1.item.image }}"
+  when: item.0.rc != 0 or item.1 is changed
+  changed_when: true
+
+- name: confirm both images are in podman storage
+  ansible.builtin.command:
+    cmd: "podman image exists {{ item.image }}"
+  loop: "{{ keycloak_idp_image_archives }}"
+  loop_control:
+    label: "{{ item.image }}"
+  changed_when: false

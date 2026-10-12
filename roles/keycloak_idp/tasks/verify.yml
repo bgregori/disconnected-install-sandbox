@@ -1,0 +1,88 @@
+---
+# Readiness, not liveness. With health enabled the endpoints open while
+# initialisation and the realm import still run in the background: liveness
+# reports UP almost immediately, readiness stays DOWN until the server is
+# genuinely finished. A first start does a Quarkus augmentation and a realm
+# import, so give it several minutes.
+- name: wait for keycloak to report ready
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ keycloak_idp_management_port }}/health/ready"
+    method: GET
+    status_code: 200
+  register: keycloak_idp_ready
+  retries: 60
+  delay: 10
+  until: keycloak_idp_ready.status | default(0) == 200
+
+# The same request the cluster makes, over TLS, validated against the same
+# CA the cluster will be handed -- not with validate_certs disabled.
+- name: fetch the oidc discovery document
+  ansible.builtin.uri:
+    url: "{{ keycloak_idp_issuer_url }}/.well-known/openid-configuration"
+    method: GET
+    return_content: true
+    status_code: 200
+    ca_path: "{{ keycloak_idp_ca_cert_path }}"
+  register: keycloak_idp_discovery
+
+- name: assert the issuer self-reports the url the cluster will be given
+  ansible.builtin.assert:
+    that:
+      - keycloak_idp_discovery.json.issuer == keycloak_idp_issuer_url
+      - keycloak_idp_discovery.json.jwks_uri is defined
+      - keycloak_idp_discovery.json.authorization_endpoint is defined
+    fail_msg: >-
+      Issuer mismatch: expected {{ keycloak_idp_issuer_url }}, discovery says
+      {{ keycloak_idp_discovery.json.issuer | default('nothing') }}.
+      Check KC_HOSTNAME on {{ keycloak_idp_service }}.
+    success_msg: "{{ keycloak_idp_issuer_url }} is serving a consistent discovery document"
+
+- name: collect the issuer ca onto the operator workstation
+  ansible.builtin.fetch:
+    src: "{{ keycloak_idp_ca_cert_path }}"
+    dest: "{{ keycloak_idp_fetch_ca_dest }}"
+    flat: true
+  when: keycloak_idp_fetch_ca | bool
+
+- name: display the identity provider summary
+  ansible.builtin.debug:
+    msg:
+      - "=== Keycloak OIDC identity provider ==="
+      - ""
+      - "Issuer URL:       {{ keycloak_idp_issuer_url }}"
+      - "Admin console:    {{ keycloak_idp_issuer_base_url }}/admin/{{ keycloak_idp_realm }}/console/"
+      - "Realm:            {{ keycloak_idp_realm }}"
+      - "OIDC client ID:   {{ keycloak_idp_client_id }}"
+      - ""
+      - "On {{ inventory_hostname }}, readable by root only:"
+      - "  client secret   {{ keycloak_idp_secret_dir }}/oidc-client-secret"
+      - "  realm admin pw  {{ keycloak_idp_secret_dir }}/realm-admin-password"
+      - "                  (realm user {{ keycloak_idp_realm_admin_user }})"
+      - "  demo user pw    {{ keycloak_idp_secret_dir }}/user-password"
+      - "                  (shared by all demo users)"
+      - "  master bootstrap pw {{ keycloak_idp_secret_dir }}/bootstrap-admin-password"
+      - "    (user {{ keycloak_idp_bootstrap_admin_user }}, master realm -- for recovery, not daily use)"
+      - ""
+      - "Issuer CA (the cluster needs this as a ConfigMap):"
+      - "  on host         {{ keycloak_idp_ca_cert_path }}"
+      - >-
+        {% if keycloak_idp_fetch_ca | bool %}  collected to    {{ keycloak_idp_fetch_ca_dest }}{% else %}
+        (not collected -- keycloak_idp_fetch_ca is false){% endif %}
+      - "  oc create configmap keycloak-ca -n openshift-config --from-file=ca.crt=<path>"
+      - ""
+      - "Realm users ({{ keycloak_idp_realm }}):"
+      - "  {{ keycloak_idp_realm_admin_user }} — realm operator (realm-management/realm-admin)"
+      - "  {{ keycloak_idp_users | join(', ') }}"
+      - >-
+        Groups: {{ keycloak_idp_groups
+                   | map(attribute='name') | join(', ') }}
+        — {{ keycloak_idp_groups[0].members | join(', ') }} in {{ keycloak_idp_groups[0].name }}
+      - ""
+      - "TOTP is a required action on this realm: every user above is prompted"
+      - "to enrol an authenticator on first login, including the realm admin."
+      - ""
+      - "Token claims: preferred_username, email, name, groups"
+      - ""
+      - "FIPS: the container inherits the host's FIPS mode, but RHBK is NOT"
+      - "running in validated FIPS mode — that needs BouncyCastle FIPS jars"
+      - "Red Hat cannot ship. See the TODO in the role defaults."

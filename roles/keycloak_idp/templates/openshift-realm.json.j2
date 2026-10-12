@@ -1,0 +1,202 @@
+{#
+  Realm definition imported by `kc.sh start --import-realm` from
+  /opt/keycloak/data/import. JSON has no comment syntax, so the notes about
+  why each block looks the way it does live here and are not rendered.
+
+  - requiredActions: supplying this array at all means the realm's required
+    actions are exactly what is listed. CONFIGURE_TOTP with defaultAction
+    true is the realm-level "every new user must enrol an authenticator"
+    switch, but it only attaches to users created AFTER the realm exists --
+    it does not retrofit the users defined in this same file. Hence the
+    per-user requiredActions as well. Passwords are temporary:false so
+    nothing here depends on UPDATE_PASSWORD being registered.
+
+  - otpPolicy* are flat realm fields, not a nested object. They describe how
+    OTP works; requiredActions is what makes it mandatory. Two different
+    axes, commonly confused.
+
+  - passwordPolicy pins pbkdf2-sha512. argon2 has been the Keycloak default
+    since RHBK 25 and is not FIPS-approved; a realm created without this on
+    a FIPS host needs every password reset later.
+
+  - Group membership is expressed from the user side, as full paths. There
+    is no members list on a group.
+
+  - preferred_username, email and name already arrive via the built-in
+    profile and email client scopes. They are declared explicitly anyway
+    because the consuming cluster repo treats this client's mapper list as
+    the contract.
+#}
+{
+  "realm": {{ keycloak_idp_realm | to_json }},
+  "displayName": "OpenShift Disconnected Sandbox",
+  "enabled": true,
+  "sslRequired": "all",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "attributes": {
+    "managedBy": "ansible role keycloak_idp"
+  },
+
+  "passwordPolicy": {{ keycloak_idp_password_policy | to_json }},
+
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": {{ keycloak_idp_otp_algorithm | to_json }},
+  "otpPolicyDigits": {{ keycloak_idp_otp_digits | int }},
+  "otpPolicyPeriod": {{ keycloak_idp_otp_period | int }},
+  "otpPolicyLookAheadWindow": 1,
+  "otpPolicyInitialCounter": 0,
+  "otpPolicyCodeReusable": false,
+
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 10,
+      "config": {}
+    }
+  ],
+
+  "groups": [
+{% for group in keycloak_idp_groups %}
+    {
+      "name": {{ group.name | to_json }},
+      "path": {{ ('/' ~ group.name) | to_json }},
+      "attributes": {},
+      "realmRoles": [],
+      "clientRoles": {},
+      "subGroups": []
+    }{{ "," if not loop.last else "" }}
+{% endfor %}
+  ],
+
+  "users": [
+    {
+      "username": {{ keycloak_idp_realm_admin_user | to_json }},
+      "enabled": true,
+      "emailVerified": true,
+      "email": {{ (keycloak_idp_realm_admin_user ~ '@' ~ keycloak_idp_user_email_domain) | to_json }},
+      "firstName": "Realm",
+      "lastName": "Operator",
+      "credentials": [
+        {
+          "type": "password",
+          "value": {{ keycloak_idp_secrets['realm-admin-password'] | to_json }},
+          "temporary": false
+        }
+      ],
+      "requiredActions": ["CONFIGURE_TOTP"],
+      "clientRoles": {
+        "realm-management": ["realm-admin"]
+      }
+    },
+{% for user in keycloak_idp_users %}
+{%   set user_group_paths = keycloak_idp_groups
+                            | selectattr('members', 'contains', user)
+                            | map(attribute='name')
+                            | map('regex_replace', '^', '/')
+                            | list %}
+    {
+      "username": {{ user | to_json }},
+      "enabled": true,
+      "emailVerified": true,
+      "email": {{ (user ~ '@' ~ keycloak_idp_user_email_domain) | to_json }},
+      "firstName": "Demo",
+      "lastName": {{ user | to_json }},
+      "credentials": [
+        {
+          "type": "password",
+          "value": {{ keycloak_idp_secrets['user-password'] | to_json }},
+          "temporary": false
+        }
+      ],
+      "requiredActions": ["CONFIGURE_TOTP"],
+      "groups": {{ user_group_paths | to_json }}
+    }{{ "," if not loop.last else "" }}
+{% endfor %}
+  ],
+
+  "clients": [
+    {
+      "clientId": {{ keycloak_idp_client_id | to_json }},
+      "name": {{ keycloak_idp_client_name | to_json }},
+      "description": "OpenShift cluster OIDC client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": {{ keycloak_idp_secrets['oidc-client-secret'] | to_json }},
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true,
+      "consentRequired": false,
+      "frontchannelLogout": true,
+      "redirectUris": {{ keycloak_idp_client_redirect_uris | to_json }},
+      "webOrigins": ["+"],
+      "protocolMappers": [
+        {
+          "name": "preferred_username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "full name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-full-name-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": {{ (keycloak_idp_groups_claim_full_path | bool) | string | lower | to_json }},
+            "claim.name": "groups",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

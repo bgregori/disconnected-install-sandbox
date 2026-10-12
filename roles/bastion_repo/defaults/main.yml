@@ -20,6 +20,11 @@ bastion_repo_packages:
   - audit
   - policycoreutils-python-utils
   - nmstate
+  # Keycloak and its database run as containers on the services host, which
+  # can reach neither a registry nor a RHEL repo of its own.
+  - podman
+  # community.crypto's backend, for the issuer CA and serving certificate.
+  - python3-cryptography
 
 # The rpm subpackages are versioned in lockstep -- each carries
 # `Requires: rpm-libs(x86-64) = <exact nevr>`. `dnf download --resolve` only
@@ -51,3 +56,23 @@ bastion_repo_kvm_packages:
 
 bastion_repo_enable_kvm: "{{ enable_kvm_host }}"
 bastion_repo_pip_wheel_dir: "{{ bastion_repo_base_dir }}/pip-wheels"
+
+# Container images for the air-gapped services host. Same relay as the RPMs
+# and the pip wheels: the bastion is the only host with internet and with
+# registry credentials, so it pulls, `podman save`s to a tar, and lets httpd
+# serve the tar out of the document root it already has.
+bastion_repo_stage_container_images: "{{ enable_keycloak_idp }}"
+bastion_repo_container_dir: "{{ bastion_repo_base_dir }}/{{ bastion_repo_container_dir_name }}"
+bastion_repo_container_images: "{{ keycloak_image_archives }}"
+
+# registry.redhat.io needs credentials. Point this at a container auth file
+# on the OPERATOR WORKSTATION -- the Red Hat pull secret, or the auth.json
+# that `podman login registry.redhat.io` writes to $XDG_RUNTIME_DIR. It is
+# never committed; pass it at run time:
+#
+#   -e bastion_repo_registry_auth_file=~/pull-secret.json
+#
+# Set bastion_repo_stage_container_images=false to skip the whole thing if
+# the sandbox does not need the identity provider.
+bastion_repo_registry_auth_file: ""
+bastion_repo_registry_auth_dest: /root/.config/containers/registry-pull-auth.json

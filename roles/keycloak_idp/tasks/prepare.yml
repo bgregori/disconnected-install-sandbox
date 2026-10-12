@@ -1,0 +1,117 @@
+---
+- name: install podman from the bastion local repo
+  ansible.builtin.dnf:
+    name: podman
+    state: present
+
+# Quadlet -- systemd units generated from .container files -- arrived in
+# podman 4.4 (RHEL 9.2). Everything below is written as Quadlet units, so an
+# older podman would silently generate nothing at all: the files would sit in
+# /etc/containers/systemd and systemctl would report no such unit. Fail here
+# with the version instead.
+- name: read the installed podman version
+  ansible.builtin.command:
+    cmd: podman --version
+  register: keycloak_idp_podman_version
+  changed_when: false
+
+- name: assert podman is new enough for quadlet
+  ansible.builtin.assert:
+    that:
+      - keycloak_idp_podman_version.stdout.split()[2] is version('4.4', '>=')
+    fail_msg: >-
+      podman {{ keycloak_idp_podman_version.stdout.split()[2] | default('unknown') }}
+      does not support Quadlet (.container units), which needs 4.4 or newer.
+    success_msg: "podman {{ keycloak_idp_podman_version.stdout.split()[2] }} supports Quadlet"
+
+- name: create keycloak directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ keycloak_idp_conf_dir }}"
+      mode: "0755"
+    # Mounted into the container, which runs as UID 1000 in group 0, so the
+    # directories themselves have to be traversable by that group.
+    - path: "{{ keycloak_idp_container_cert_dir }}"
+      mode: "0750"
+    - path: "{{ keycloak_idp_import_dir }}"
+      mode: "0750"
+    - path: "{{ keycloak_idp_state_dir }}"
+      mode: "0755"
+    - path: "{{ keycloak_idp_image_dir }}"
+      mode: "0755"
+    - path: "{{ keycloak_idp_quadlet_dir }}"
+      mode: "0755"
+  loop_control:
+    label: "{{ item.path }}"
+
+# The PostgreSQL image is hard-committed to UID 26 -- the upstream Dockerfile
+# says so in as many words and has a test enforcing it -- and it writes to
+# this directory. :Z on the mount fixes the SELinux label but not the owner.
+- name: create the postgres data directory owned by the image uid
+  ansible.builtin.file:
+    path: "{{ keycloak_idp_pgdata_dir }}"
+    state: directory
+    owner: "26"
+    group: "0"
+    mode: "0700"
+
+# fapolicyd "does not fully support namespaces and containers" (RHEL 9
+# Security Hardening, ch. 13). Without this the OCI runtime cannot load its
+# own shared libraries and every container start dies with
+#
+#   crun: error while loading shared libraries: libsystemd.so.0:
+#   cannot open shared object file: Operation not permitted
+#
+# The runc rules are Red Hat's documented workaround, quoted verbatim; the
+# crun pair is the same workaround with the exe path swapped, which is what
+# the matching Customer Portal solution (7072618) says to do -- crun, not
+# runc, is the default OCI runtime on RHEL 9.
+#
+# STIG installs and enables fapolicyd, so on a hardened host this must land
+# before anything tries to start a container.
+- name: create the fapolicyd rules directory
+  ansible.builtin.file:
+    path: /etc/fapolicyd/rules.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: allow the oci runtime to load its libraries under fapolicyd
+  ansible.builtin.copy:
+    content: |
+      allow perm=any pattern=ld_so exe=/usr/bin/runc : all
+      allow perm=any uid=0 pattern=ld_so exe=/runc : trust=1
+      allow perm=any pattern=ld_so exe=/usr/bin/crun : all
+      allow perm=any uid=0 pattern=ld_so exe=/crun : trust=1
+    dest: /etc/fapolicyd/rules.d/25-oci-runtime.rules
+    owner: root
+    group: root
+    mode: "0644"
+  register: keycloak_idp_fapolicyd_rules
+
+- name: check whether fapolicyd is installed
+  ansible.builtin.stat:
+    path: /usr/sbin/fapolicyd
+  register: keycloak_idp_fapolicyd_binary
+
+# rules.d is only source text -- fapolicyd reads the compiled
+# /etc/fapolicyd/compiled.rules, which fagenrules regenerates. Skipping this
+# leaves the rules written but inert. If fapolicyd is not installed yet the
+# package's own post-install will compile them.
+- name: compile and reload the fapolicyd rules # noqa: no-handler
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      fagenrules --load
+      fapolicyd-cli --reload-rules
+    executable: /bin/bash
+  when:
+    - keycloak_idp_fapolicyd_rules is changed
+    - keycloak_idp_fapolicyd_binary.stat.exists
+  changed_when: true

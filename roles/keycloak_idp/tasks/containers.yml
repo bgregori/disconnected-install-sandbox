@@ -1,0 +1,89 @@
+---
+# Passwords go in EnvironmentFiles rather than Environment= lines so the
+# Quadlet units stay readable by anyone who can read /etc/containers/systemd
+# without handing them the database and the bootstrap admin account.
+- name: write the postgres environment file
+  ansible.builtin.copy:
+    content: |
+      POSTGRESQL_PASSWORD={{ keycloak_idp_secrets['db-password'] }}
+    dest: "{{ keycloak_idp_conf_dir }}/postgres.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart keycloak postgres
+
+- name: write the keycloak environment file
+  ansible.builtin.copy:
+    content: |
+      KC_DB_PASSWORD={{ keycloak_idp_secrets['db-password'] }}
+      KC_BOOTSTRAP_ADMIN_PASSWORD={{ keycloak_idp_secrets['bootstrap-admin-password'] }}
+    dest: "{{ keycloak_idp_conf_dir }}/keycloak.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart keycloak
+
+- name: deploy the quadlet units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ keycloak_idp_quadlet_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - keycloak.network
+    - keycloak-postgres.container
+    - keycloak.container
+  register: keycloak_idp_units
+  notify:
+    - restart keycloak postgres
+    - restart keycloak
+
+# Quadlet is a systemd generator: the .container files above become units
+# only when systemd re-runs its generators. Nothing below can reference
+# {{ keycloak_idp_service }} until this has happened, which is why it is a
+# task and not a handler.
+- name: reload systemd so quadlet generates the units # noqa: no-handler
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: keycloak_idp_units is changed
+
+# No `enabled: true` on either of these. Quadlet units are transient and
+# cannot be systemctl-enabled -- `[Install] WantedBy=multi-user.target` in
+# the .container file is what makes them start at boot, and it is applied
+# when the generator runs.
+- name: start the postgres container
+  ansible.builtin.systemd:
+    name: "{{ keycloak_idp_postgres_service }}"
+    state: started
+
+- name: wait for postgres to accept connections
+  ansible.builtin.command:
+    cmd: >-
+      podman exec {{ keycloak_idp_postgres_container_name }}
+      pg_isready -U {{ keycloak_idp_db_user }} -d {{ keycloak_idp_db_name }}
+  register: keycloak_idp_pg_ready
+  retries: 30
+  delay: 5
+  until: keycloak_idp_pg_ready.rc == 0
+  changed_when: false
+
+- name: start keycloak
+  ansible.builtin.systemd:
+    name: "{{ keycloak_idp_service }}"
+    state: started
+
+# Pick up any restart queued by a changed certificate, environment file or
+# unit before the verification tasks start probing the server.
+- name: apply pending restarts before verifying
+  ansible.builtin.meta: flush_handlers
+
+- name: open the firewall for the issuer port
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ keycloak_idp_firewall_ports }}"

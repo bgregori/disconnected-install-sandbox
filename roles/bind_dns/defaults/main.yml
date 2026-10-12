@@ -15,6 +15,11 @@ bind_dns_records:
     ip: "{{ ingress_vip }}"
   - name: services
     ip: "{{ services_private_ip }}"
+  # Keycloak runs on the services host but gets a name of its own. The OIDC
+  # issuer URL is baked into cluster config and into every token it signs, so
+  # it must survive the IdP ever moving off this host.
+  - name: keycloak
+    ip: "{{ services_private_ip }}"
   - name: registry
     ip: "{{ registry_private_ip }}"
   - name: bastion

@@ -1,0 +1,33 @@
+---
+# RHBK reads every top-level *.json in /opt/keycloak/data/import when started
+# with --import-realm. Mode 0640 root:root: the file carries the realm
+# admin's password, the demo users' passwords and the OIDC client secret, and
+# the container reads it as UID 1000 in group 0.
+#
+# IMPORTANT, and the single biggest operational caveat of this role: the
+# startup import is CREATE-ONCE. Red Hat's wording is that an existing realm
+# is skipped, "to avoid re-creating realms and potentially lose state between
+# server restarts", and there is no override for the --import-realm path.
+# Editing this template and re-running the role therefore changes the file on
+# disk and nothing else. To actually re-apply it, delete the realm through
+# the admin console (or stop the server and run `kc.sh import --override
+# true` against the same database) and then restart.
+- name: render the realm definition
+  ansible.builtin.template:
+    src: openshift-realm.json.j2
+    dest: "{{ keycloak_idp_import_dir }}/{{ keycloak_idp_realm }}-realm.json"
+    owner: root
+    group: root
+    mode: "0640"
+  no_log: true
+  register: keycloak_idp_realm_file
+
+- name: warn when the realm definition changed after the realm already existed # noqa: no-handler
+  ansible.builtin.debug:
+    msg: >-
+      {{ keycloak_idp_realm }}-realm.json changed, but RHBK's --import-realm
+      skips a realm that already exists. If the realm is already in the
+      database these edits will NOT be applied -- delete the realm and
+      restart {{ keycloak_idp_service }}, or import it explicitly with
+      `kc.sh import --override true` while the server is stopped.
+  when: keycloak_idp_realm_file is changed

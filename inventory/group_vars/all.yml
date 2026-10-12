@@ -197,6 +197,44 @@ registry_data_volume_size: 500
 registry_port: 8443
 # Bastion local yum repo - serves packages to air-gapped private hosts
 bastion_repo_port: 8080
+# Subdirectory of the bastion document root holding saved container image
+# archives. bastion_repo writes it, keycloak_idp fetches from it; defined
+# here so neither role has to reach into the other's defaults.
+bastion_repo_container_dir_name: container-images
+
+# Keycloak (Red Hat build of Keycloak) OIDC identity provider on the services
+# host. Keycloak terminates TLS itself, so this is its own HTTPS listener --
+# nothing proxies it. The issuer a cluster federates to is
+# https://keycloak.{{ cluster_domain }}:{{ keycloak_port }}/realms/{{ keycloak_realm }}
+#
+# Turning this off also stops the bastion pulling and staging the container
+# images, which is the part that needs Red Hat registry credentials.
+enable_keycloak_idp: true
+keycloak_port: 8443
+keycloak_realm: openshift
+keycloak_hostname: "keycloak.{{ cluster_domain }}"
+keycloak_issuer_url: "https://{{ keycloak_hostname }}:{{ keycloak_port }}/realms/{{ keycloak_realm }}"
+# Where the issuer's CA lands on the services host. validate.yml and the
+# operator both read it from here, so it lives in all.yml rather than in the
+# role, which is the only thing that writes it.
+keycloak_ca_cert_path: /etc/pki/keycloak/keycloak-ca.crt
+
+# RHBK 26.6 is the current release stream. The second component of the image
+# tag is a BUILD number, not the z-stream: 26.6-20 is what ships RHBK 26.6.7.
+# There is no 26.6.7 tag. Pin to a build or a digest for a reproducible
+# sandbox; the floating 26.6 tag is the default because this is a sandbox.
+keycloak_image: "registry.redhat.io/rhbk/keycloak-rhel9:26.6"
+# PostgreSQL 16 sits inside the 14.x-18.x range RHBK 26.6 supports.
+keycloak_postgres_image: "registry.redhat.io/rhel9/postgresql-16:1"
+
+# The bastion pulls these and podman-saves them under
+# bastion_repo_container_dir_name; keycloak_idp fetches and podman-loads
+# them. Named in one place so the two ends cannot drift.
+keycloak_image_archives:
+  - image: "{{ keycloak_image }}"
+    archive: rhbk-keycloak.tar
+  - image: "{{ keycloak_postgres_image }}"
+    archive: rhbk-postgres.tar
 
 # KVM host for bare metal simulation (Agent-Based Installer)
 enable_kvm_host: true

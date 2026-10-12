@@ -216,6 +216,7 @@ roles/bastion_haproxy       Phase 2 — HAProxy reverse proxy for OCP API + apps
 roles/bind_dns              Phase 2 — BIND9 DNS server
 roles/chrony_ntp            Phase 2 — Chrony NTP server
 roles/common_client         Phase 2 — DNS/NTP client config for all private hosts
+roles/keycloak_idp          Phase 2 — RHBK OIDC identity provider (podman + PostgreSQL)
 roles/kvm_host              Phase 2 — KVM/libvirt host with OCP node VMs (optional)
 roles/redfish_bmc           Phase 2 — sushy-emulator Redfish BMC (optional)
 roles/ocp_node_prep         Phase 2 — OCP node prerequisites and validation

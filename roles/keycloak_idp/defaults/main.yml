@@ -1,0 +1,166 @@
+---
+# Red Hat build of Keycloak as an OIDC issuer on the air-gapped services
+# host, with PostgreSQL alongside it. Both run as rootful podman containers
+# managed by Quadlet.
+#
+# SUPPORT POSTURE, read before relying on this for anything but a sandbox:
+# RHBK 26.6's own container chapter says podman is for building and
+# customising images and is "not supported for running Red Hat build of
+# Keycloak in production environments". The Supported Configurations article
+# lists only OpenShift/ROSA/ARO/OSD/OKE as container platforms. This works
+# fine technically; it is outside Red Hat's supported matrix.
+#
+# FIPS, and what this role does and does not do about it:
+# The host is FIPS-enabled and RHBK's docs are explicit that a container
+# inherits the host's FIPS state -- the JDK inside will offer only
+# FIPS-approved providers whether or not we ask it to. Running *in* FIPS mode
+# is not the same as being FIPS-compliant. Compliance additionally needs the
+# BouncyCastle FIPS jars in /opt/keycloak/providers plus `--features=fips`
+# (and `--fips-mode=strict`), and Red Hat cannot ship those jars.
+#
+#   TODO: strict FIPS mode is NOT configured here. Adding it needs
+#     (a) bc-fips, bctls-fips, bcpkix-fips and bcutil-fips staged through
+#         the bastion the way the images are,
+#     (b) a providers volume mount, and
+#     (c) a rebuilt image -- fips-mode is a BUILD-time option and cannot be
+#         handed to the stock image at `start`.
+#     The environment-variable spelling for fips-mode is UNVERIFIED; the only
+#     form Red Hat documents is the `kc.sh build --fips-mode=strict` flag.
+#
+# What the role does do for FIPS: pins the realm to pbkdf2-sha512, because
+# argon2 has been the default since RHBK 25 and is not FIPS-approved, and
+# generates 24-character secrets, because strict mode requires >= 14.
+
+# Identity. These come from all.yml because validate.yml and the consuming
+# cluster repo need the same issuer string without loading this role.
+keycloak_idp_hostname: "{{ keycloak_hostname }}"
+keycloak_idp_port: "{{ keycloak_port }}"
+keycloak_idp_realm: "{{ keycloak_realm }}"
+keycloak_idp_issuer_url: "{{ keycloak_issuer_url }}"
+# Everything up to /realms/<realm> -- what KC_HOSTNAME wants.
+keycloak_idp_issuer_base_url: "https://{{ keycloak_idp_hostname }}:{{ keycloak_idp_port }}"
+
+# Container images, relayed from the bastion. The archive names are shared
+# with bastion_repo, which is what writes them.
+keycloak_idp_image: "{{ keycloak_image }}"
+keycloak_idp_postgres_image: "{{ keycloak_postgres_image }}"
+keycloak_idp_image_archives: "{{ keycloak_image_archives }}"
+keycloak_idp_image_base_url: >-
+  http://{{ bastion_private_ip }}:{{ bastion_repo_port }}/{{ bastion_repo_container_dir_name }}
+
+# Paths on the services host
+keycloak_idp_conf_dir: /etc/keycloak
+keycloak_idp_secret_dir: /etc/keycloak/secrets
+keycloak_idp_container_cert_dir: /etc/keycloak/certs
+keycloak_idp_import_dir: /etc/keycloak/import
+keycloak_idp_state_dir: /var/lib/keycloak
+keycloak_idp_pgdata_dir: /var/lib/keycloak/pgdata
+keycloak_idp_image_dir: /var/lib/keycloak/images
+keycloak_idp_pki_dir: /etc/pki/keycloak
+keycloak_idp_ca_cert_path: "{{ keycloak_ca_cert_path }}"
+keycloak_idp_ca_key_path: "{{ keycloak_idp_pki_dir }}/keycloak-ca.key"
+keycloak_idp_tls_cert_path: "{{ keycloak_idp_pki_dir }}/keycloak.crt"
+keycloak_idp_tls_key_path: "{{ keycloak_idp_pki_dir }}/keycloak.key"
+keycloak_idp_quadlet_dir: /etc/containers/systemd
+
+# Where the CA lands on the operator's workstation. The cluster consumes it
+# as a ConfigMap, so it has to leave the air-gapped host somehow.
+keycloak_idp_fetch_ca: true
+keycloak_idp_fetch_ca_dest: "{{ playbook_dir }}/../artifacts/keycloak-ca.crt"
+
+# TLS. RSA + SHA-256 are FIPS 140-3 approved; 3072 bits clears the 2048-bit
+# floor RHBK's strict FIPS mode imposes with room to spare.
+keycloak_idp_key_size: 3072
+keycloak_idp_ca_common_name: "Disconnected Sandbox Keycloak Issuer CA"
+keycloak_idp_ca_validity: "+3650d"
+keycloak_idp_cert_validity: "+825d"
+keycloak_idp_tls_san:
+  - "DNS:{{ keycloak_idp_hostname }}"
+  - "DNS:services.{{ cluster_domain }}"
+  - "DNS:services"
+  - "IP:{{ services_private_ip }}"
+
+# Container and systemd naming. A .container Quadlet file called foo.container
+# generates foo.service, which is why these two are spelled the way they are.
+keycloak_idp_network: keycloak
+keycloak_idp_container_name: keycloak
+keycloak_idp_postgres_container_name: keycloak-postgres
+keycloak_idp_service: keycloak.service
+keycloak_idp_postgres_service: keycloak-postgres.service
+
+# Database
+keycloak_idp_db_name: keycloak
+keycloak_idp_db_user: keycloak
+keycloak_idp_db_port: 5432
+
+# Management interface. RHBK serves /health and /metrics on a separate port
+# (9000 by default) and it inherits the main listener's scheme -- which here
+# is HTTPS. Forcing it back to plain HTTP and publishing it on loopback only
+# keeps the local readiness probe off the network and off the issuer cert.
+keycloak_idp_management_port: 9000
+keycloak_idp_management_scheme: http
+
+# Resource limits. Not optional: the RHBK image sizes its heap with
+# -XX:MaxRAMPercentage=70, which without a cgroup limit means 70% of the
+# whole host -- and the services host also runs BIND and chrony. Red Hat's
+# floor is 750 MB for the server; 2 GB for anything resembling production.
+keycloak_idp_memory: 1792m
+keycloak_idp_postgres_memory: 512m
+
+# Secrets. Generated on the host, never committed, never templated into a
+# unit file. 24 characters clears the 14-character minimum RHBK's strict FIPS
+# mode imposes on client secrets and passwords.
+keycloak_idp_secret_length: 24
+keycloak_idp_secret_names:
+  - bootstrap-admin-password
+  - realm-admin-password
+  - db-password
+  - oidc-client-secret
+  - user-password
+
+# Realm contents
+keycloak_idp_bootstrap_admin_user: temp-admin
+keycloak_idp_realm_admin_user: admin
+keycloak_idp_user_email_domain: "{{ sandbox_domain }}"
+
+keycloak_idp_users:
+  - user1
+  - user2
+  - user3
+  - user4
+  - user5
+
+keycloak_idp_groups:
+  - name: cluster-admins
+    members:
+      - user1
+
+# argon2 has been Keycloak's default password hash since RHBK 25 and is not
+# FIPS-approved, so a realm created on a FIPS host must pin pbkdf2-sha512 up
+# front -- retrofitting it means resetting every password.
+keycloak_idp_password_policy: "hashAlgorithm(pbkdf2-sha512) and length(14)"
+
+# TOTP. HmacSHA1 is the Keycloak default and the only algorithm every
+# authenticator app handles; the digits/period values are the TOTP defaults
+# those apps assume.
+keycloak_idp_otp_algorithm: HmacSHA1
+keycloak_idp_otp_digits: 6
+keycloak_idp_otp_period: 30
+
+# OIDC client
+keycloak_idp_client_id: openshift
+keycloak_idp_client_name: OpenShift
+keycloak_idp_groups_claim_full_path: false
+
+# Redirect URIs for the cluster that will federate here. The first is the
+# built-in OAuth server's callback (the classic OpenID Connect identity
+# provider path), the second the console callback used when the cluster is
+# configured for external OIDC. The consuming repo should confirm which of
+# the two its install uses and trim or extend this list.
+keycloak_idp_client_redirect_uris:
+  - "https://oauth-openshift.apps.{{ cluster_domain }}/oauth2callback/{{ keycloak_idp_client_id }}"
+  - "https://console-openshift-console.apps.{{ cluster_domain }}/auth/callback"
+
+# Firewall. Only the issuer port; the management port is bound to loopback.
+keycloak_idp_firewall_ports:
+  - "{{ keycloak_idp_port }}/tcp"

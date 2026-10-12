@@ -67,6 +67,10 @@
         ports: "{{ infra_security_groups_redfish_port }}"
         cidr_ip: "{{ infra_security_groups_kvm_ip }}/32"
         rule_desc: "Redfish BMC on KVM host"
+      - proto: tcp
+        ports: "{{ infra_security_groups_keycloak_port }}"
+        cidr_ip: "{{ infra_security_groups_services_ip }}/32"
+        rule_desc: "Keycloak OIDC issuer on services host"
     tags:
       Name: "{{ infra_security_groups_project_tag }}-bastion"
       Project: "{{ infra_security_groups_project_tag }}"
@@ -97,6 +101,17 @@
         ports: 123
         cidr_ip: "{{ infra_security_groups_private_subnet_cidr }}"
         rule_desc: "NTP from private subnet"
+      - proto: tcp
+        ports: "{{ infra_security_groups_keycloak_port }}"
+        cidr_ip: "{{ infra_security_groups_private_subnet_cidr }}"
+        rule_desc: "Keycloak OIDC issuer HTTPS from private subnet"
+      # The bastion is on the public subnet, so the rule above does not cover
+      # it. It needs its own: the bastion is where the operator reaches the
+      # Keycloak admin console and collects the issuer CA.
+      - proto: tcp
+        ports: "{{ infra_security_groups_keycloak_port }}"
+        group_id: "{{ infra_security_groups_bastion_result.group_id }}"
+        rule_desc: "Keycloak admin console from bastion"
     rules_egress:
       - proto: all
         cidr_ip: "{{ infra_security_groups_vpc_cidr }}"
@@ -313,6 +328,12 @@
         ports: 123
         cidr_ip: "{{ infra_security_groups_services_ip }}/32"
         rule_desc: "NTP to services host"
+      # OIDC identity provider - the cluster's oauth stack fetches the issuer
+      # discovery document and the JWKS from here on every token validation.
+      - proto: tcp
+        ports: "{{ infra_security_groups_keycloak_port }}"
+        cidr_ip: "{{ infra_security_groups_services_ip }}/32"
+        rule_desc: "Keycloak OIDC issuer on services host"
       # Registry
       - proto: tcp
         ports: 5000
