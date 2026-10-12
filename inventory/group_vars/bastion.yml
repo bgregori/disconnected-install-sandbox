@@ -1,3 +1,0 @@
----
-# Direct SSH - no ProxyCommand needed for the bastion itself
-ansible_ssh_common_args: ""

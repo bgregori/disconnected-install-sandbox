@@ -105,6 +105,8 @@ yamllint .
 - Use `block/rescue` for AWS operations that need rollback awareness.
 - Register results with descriptive names: `vpc_result`, not `result` or `r`.
 - Prefix role variables with the role name: `bind_dns_listen_ip`, `chrony_ntp_allow_subnet`.
+- Name per-group files in `inventory/group_vars/` for the group the `aws_ec2` plugin actually creates —
+  `role_bastion.yml`, not `bastion.yml`. A file matching no group is silently ignored, with no warning.
 - Use `ansible.builtin.assert` for validation checkpoints, not debug + fail.
 - All AWS resources MUST be tagged with `Project: disconnected-sandbox` and `Environment: sandbox`.
 - Use `amazon.aws.ec2_instance` (not the deprecated `ec2` module).

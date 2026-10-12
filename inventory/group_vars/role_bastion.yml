@@ -1,0 +1,10 @@
+---
+# Direct SSH - no ProxyCommand needed for the bastion itself.
+#
+# The aws_ec2 plugin prefixes keyed groups with role_, so this file has to be
+# named role_bastion.yml to load at all. It was bastion.yml until 2026-10-12
+# and therefore never applied; the bastion plays in phase2_configure.yml and
+# validate.yml each set ansible_ssh_common_args: "" at play level, which is
+# what actually kept the bastion off the ProxyCommand. Those play-level
+# settings are now redundant but harmless, and are left in place.
+ansible_ssh_common_args: ""

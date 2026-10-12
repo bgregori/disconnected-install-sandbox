@@ -828,7 +828,7 @@ inventory/group_vars/all.yml          # Lowest precedence — global defaults
   ├── rhel_hardening_apply_stig: true
   └── rhel_hardening_stig_profile: xccdf_org.ssgproject.content_profile_stig
 
-inventory/group_vars/bastion.yml
+inventory/group_vars/role_bastion.yml
   └── ansible_ssh_common_args: ""     # Direct connection (no ProxyCommand)
 
 inventory/group_vars/private_hosts.yml
@@ -836,12 +836,16 @@ inventory/group_vars/private_hosts.yml
         -o ProxyCommand="ssh -W %h:%p -i {{ ssh_key_path }}
         ec2-user@{{ hostvars[groups['role_bastion'][0]].ansible_host }}"
 
-inventory/group_vars/services.yml
-  └── ntp_allow_subnet: 10.0.2.0/24
+inventory/group_vars/role_services.yml
+  └── (no vars — chrony_ntp_allow_subnet defaults to private_subnet_cidr)
 
-inventory/group_vars/registry.yml
+inventory/group_vars/role_registry.yml
   └── (infrastructure-only marker — no vars beyond all.yml)
 ```
+
+Per-group files MUST be named for the group the `aws_ec2` plugin actually creates, which is
+`sandbox_role` prefixed with `role_` — so `role_bastion.yml`, not `bastion.yml`. A mismatched
+name is silently ignored: Ansible does not warn about a group_vars file that matches no group.
 
 ---
 
