@@ -11,6 +11,14 @@ ContainerName={{ keycloak_idp_container_name }}
 Image={{ keycloak_idp_image }}
 Network={{ keycloak_idp_network }}.network
 
+# Rootless UID mapping, and it is not optional. By default the host user maps
+# to container UID 0 and everything else lands in the subuid range -- so this
+# image's UID 1000 would be a subuid with no access to files the host user
+# owns, and the server dies with AccessDeniedException on its own TLS key.
+# keep-id makes the host user appear as 1000:0 inside, which is what the
+# image runs as, so owner-only files staged by Ansible are readable.
+UserNS=keep-id:uid=1000,gid=0
+
 # Bound to the private address, not 0.0.0.0. The management interface --
 # /health and /metrics, on its own port since RHBK 26 -- is on loopback only
 # and never leaves the host.

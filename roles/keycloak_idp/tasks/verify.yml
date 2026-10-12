@@ -54,7 +54,7 @@
       - "Realm:            {{ keycloak_idp_realm }}"
       - "OIDC client ID:   {{ keycloak_idp_client_id }}"
       - ""
-      - "On {{ inventory_hostname }}, readable by root only:"
+      - "On {{ inventory_hostname }}, readable by {{ keycloak_idp_user }} only:"
       - "  client secret   {{ keycloak_idp_secret_dir }}/oidc-client-secret"
       - "  realm admin pw  {{ keycloak_idp_secret_dir }}/realm-admin-password"
       - "                  (realm user {{ keycloak_idp_realm_admin_user }})"

@@ -100,8 +100,9 @@
 
 # Copies, not the originals: the CA private key stays root-owned in
 # /etc/pki/keycloak, while the container needs to read the serving pair as the
-# rootless service user. Container UID 1000 in group 0 maps back to that user
-# under rootless, so plain owner access is enough and the key stays 0600.
+# rootless service user. UserNS=keep-id:uid=1000,gid=0 on the unit presents
+# that user to the container as 1000:0 -- the UID the image runs as -- so
+# owner-only access is enough and the key stays 0600.
 - name: stage serving material where the container can read it
   ansible.builtin.copy:
     src: "{{ item.src }}"

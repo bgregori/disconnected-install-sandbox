@@ -13,6 +13,11 @@ ContainerName={{ keycloak_idp_postgres_container_name }}
 Image={{ keycloak_idp_postgres_image }}
 Network={{ keycloak_idp_network }}.network
 
+# See the UserNS note in keycloak.container.j2. This image is committed to
+# UID 26, so the host user is mapped to 26:0 inside and the data directory
+# can simply be owned by that user on the host.
+UserNS=keep-id:uid={{ keycloak_idp_postgres_uid }},gid=0
+
 # POSTGRESQL_USER/PASSWORD/DATABASE are the three variables this image uses
 # to initialise the cluster on first start. The password comes from the
 # EnvironmentFile so it stays out of this world-readable unit.
@@ -21,8 +26,8 @@ Environment=POSTGRESQL_DATABASE={{ keycloak_idp_db_name }}
 EnvironmentFile={{ keycloak_idp_conf_dir }}/postgres.env
 
 # :Z gives the directory this container's private SELinux label. The host
-# directory is owned by UID 26 because that is the UID this image is
-# permanently committed to running as.
+# directory is owned by the service user, which UserNS above presents to the
+# container as UID 26 -- the UID this image is permanently committed to.
 Volume={{ keycloak_idp_pgdata_dir }}:/var/lib/pgsql/data:Z
 
 # Via PodmanArgs: Quadlet has no memory key, and an unsupported key makes the

@@ -21,9 +21,9 @@
 #
 # Consequences that shaped the rest of this role: units live under the user's
 # ~/.config/containers/systemd, systemd calls need scope=user, the user needs
-# lingering so the units survive logout and come back at boot, and the
-# PostgreSQL image's UID 26 maps through the user's subuid range rather than
-# being a real host UID.
+# lingering so the units survive logout and come back at boot, and both units
+# set UserNS=keep-id so the UID each image expects resolves to this user
+# instead of an unrelated subuid.
 
 - name: install container and crypto tooling from the bastion local repo
   ansible.builtin.dnf:
@@ -126,11 +126,11 @@
 # The PostgreSQL image is hard-committed to UID 26 -- the upstream Dockerfile
 # says so in as many words and has a test enforcing it -- and it writes here.
 #
-# Rootless changes what that means on the host. Container UID 26 is not host
-# UID 26; it maps to the 26th entry of the service user's subuid range, so the
-# directory has to be chowned to that mapped ID. podman unshare runs the chown
-# inside the user namespace, which does the translation for us -- doing the
-# arithmetic by hand against /etc/subuid is the usual way to get this wrong.
+# Plain service-user ownership is correct because the unit sets
+# UserNS=keep-id:uid=26, which presents this user to the container as UID 26.
+# Without that mapping the host user would be container UID 0 and the image's
+# UID 26 would be an unrelated subuid with no access -- which is exactly how
+# this failed the first time.
 - name: create the postgres data directory
   ansible.builtin.file:
     path: "{{ keycloak_idp_pgdata_dir }}"
@@ -138,11 +138,3 @@
     owner: "{{ keycloak_idp_user }}"
     group: "{{ keycloak_idp_user }}"
     mode: "0700"
-
-- name: map the postgres data directory to the image uid inside the user namespace
-  ansible.builtin.command:
-    cmd: podman unshare chown -R {{ keycloak_idp_postgres_uid }}:0 {{ keycloak_idp_pgdata_dir }}
-  become: true
-  become_user: "{{ keycloak_idp_user }}"
-  register: keycloak_idp_pgdata_chown
-  changed_when: keycloak_idp_pgdata_chown.rc == 0
