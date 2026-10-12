@@ -13,7 +13,7 @@ Ansible playbooks that provision an isolated AWS sandbox simulating a **disconne
                  │      │                                               │
                  │  ────│── Private Subnet 10.0.2.0/24 ──────────────  │
                  │      │                                               │
-                 │      ├── services (t3.medium, 50 GiB)                        │
+                 │      ├── services (t3.large, 50 GiB)                         │
                  │      │     BIND9 DNS + Chrony NTP                    │
                  │      │     Keycloak OIDC issuer (:8443) + PostgreSQL │
                  │      │                                               │
@@ -40,7 +40,9 @@ Ansible playbooks that provision an isolated AWS sandbox simulating a **disconne
 build of Keycloak (RHBK) with a PostgreSQL backing store, both as podman containers managed by
 Quadlet, serving an issuer at `https://keycloak.ocp.{sandbox_domain}:8443/realms/openshift` for a
 cluster to federate to. Opt in with `-e enable_keycloak_idp=true`, which adds both the image
-staging and the role. The images cannot be pulled on an air-gapped host, so the bastion pulls them
+staging and the role, and sizes the services host up from `t3.medium` to `t3.large` — the two
+container memory limits come to 2.25 GiB, which leaves too little headroom on a 4 GiB host that is
+also serving DNS and NTP. The images cannot be pulled on an air-gapped host, so the bastion pulls them
 and `podman save`s them into the same httpd document root that already serves the yum repo. That
 pull needs Red Hat registry credentials, which is why the IdP is off by default:
 

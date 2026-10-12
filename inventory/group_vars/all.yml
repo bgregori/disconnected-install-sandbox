@@ -189,7 +189,24 @@ ingress_vip: >-
 # which does not load per-group group_vars)
 bastion_instance_type: t3.xlarge
 bastion_root_volume_size: 500
-services_instance_type: t3.medium
+# t3.medium (4 GiB) is enough for BIND and chrony. Keycloak is not: the two
+# container memory limits come to 2304 MiB, and a t3.medium reports ~3576 MiB
+# usable with ~2876 MiB free once the STIG'd base is running -- about 570 MiB
+# of headroom on a host that also serves DNS and NTP. First start is the worst
+# moment for that, because KC_DB is a build-time option so every start re-runs
+# the Quarkus augmentation, with the realm import on top. An OOM kill there
+# shows up as a restart loop (the unit is Restart=always), not a clean error.
+#
+# t3.large doubles memory to 8 GiB at the same 2 vCPU, and is already the
+# registry host's size, so this adds no new instance type to the environment.
+#
+# Note this sizes the HOST, not the JVM: Keycloak takes 70% of its cgroup
+# limit, so raising keycloak_idp_memory is a separate decision. The win here
+# is margin for BIND, chrony, page cache and the augmentation spike.
+#
+# Override directly with -e services_instance_type=... if you want something
+# else; this only picks the default.
+services_instance_type: "{{ 't3.large' if enable_keycloak_idp | bool else 't3.medium' }}"
 services_root_volume_size: 50
 registry_instance_type: t3.large
 registry_root_volume_size: 200

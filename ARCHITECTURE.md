@@ -254,7 +254,7 @@ on the bastion L4-forwards to the keepalived VIPs on the private subnet.
 | Host               | Subnet  | Instance Type | Private IP     | Security Group(s)        | Root Vol | Additional Vol |
 |--------------------|---------|---------------|----------------|--------------------------|----------|----------------|
 | bastion            | Public  | t3.xlarge     | 10.0.1.10      | sg-bastion               | 500 GiB  | —              |
-| services           | Private | t3.medium     | 10.0.2.10      | sg-services              | 50 GiB   | —              |
+| services           | Private | t3.medium, t3.large w/ IdP | 10.0.2.10      | sg-services              | 50 GiB   | —              |
 | registry           | Private | t3.large      | 10.0.2.20      | sg-registry              | 50 GiB   | 500 GiB (images)|
 | kvm (optional)     | Private | m5.metal      | 10.0.2.30      | sg-kvm-host + sg-ocp-nodes | 200 GiB  | per topology (VM images) |
 
@@ -857,7 +857,7 @@ inventory/group_vars/all.yml          # Lowest precedence — global defaults
   │ on localhost which does not load per-group group_vars):
   ├── bastion_instance_type: t3.xlarge
   ├── bastion_root_volume_size: 500
-  ├── services_instance_type: t3.medium
+  ├── services_instance_type: (derived)   # t3.large when enable_keycloak_idp, else t3.medium
   ├── services_root_volume_size: 50
   ├── registry_instance_type: t3.large
   ├── registry_root_volume_size: 50
