@@ -33,6 +33,116 @@
       ansible.builtin.debug:
         msg: "Air-gap confirmed — no internet connectivity from {{ inventory_hostname }}"
 
+# Data volumes mount with nofail, so every way this can go wrong is quiet: the
+# host boots, the mount point is an empty directory on the root disk, and
+# nothing logs an error. The checks below cover the three states that matter --
+# mounted at all, backed by the data volume rather than the root disk, and
+# recorded in fstab by UUID so it survives the next NVMe re-enumeration.
+- name: validate data volume mounts
+  hosts: role_registry:role_kvm
+  gather_facts: false
+  vars:
+    # Spelled out rather than read from the roles: validate.yml applies no
+    # roles, so kvm_host's defaults are not in scope here. Keep in step with
+    # kvm_host_data_mount (roles/kvm_host/defaults/main.yml) and with
+    # phase2_registry_data_mount (playbooks/phase2_configure.yml).
+    validate_data_mount: >-
+      {{ '/var/lib/libvirt/images'
+         if inventory_hostname in (groups['role_kvm'] | default([]))
+         else '/data' }}
+
+  tasks:
+    - name: check what is mounted at the data mount point
+      ansible.builtin.command:
+        cmd: findmnt -n -o SOURCE {{ validate_data_mount }}
+      register: validate_data_source
+      changed_when: false
+      failed_when: false
+
+    - name: assert data volume is mounted
+      ansible.builtin.assert:
+        that:
+          - validate_data_source.rc == 0
+        fail_msg: >-
+          Nothing is mounted at {{ validate_data_mount }} on
+          {{ inventory_hostname }}. The fstab entry is nofail, so the host
+          booted past this without complaining. Check that the entry names a
+          UUID rather than a device path, and that `blkid` still reports that
+          UUID on an attached volume.
+        success_msg: >-
+          {{ validate_data_mount }} is mounted from
+          {{ validate_data_source.stdout | trim }}
+
+    # Walks each mount back to its whole-disk parent (a partition reports its
+    # disk in PKNAME; a whole-disk device reports nothing, so fall back to the
+    # device itself). If the two agree, the data mount is sitting on the root
+    # disk -- which is exactly what a device-path fstab entry produces once
+    # AWS renumbers the NVMe devices across a reboot.
+    - name: resolve the backing disks for the data mount and for /
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          parent_disk() {
+            src=$(findmnt -nr -o SOURCE --target "$1" | head -1)
+            case "$src" in
+              /dev/*) ;;
+              *) echo ""; return ;;
+            esac
+            pk=$(lsblk -nro PKNAME "$src" 2>/dev/null | head -1)
+            if [ -n "$pk" ]; then echo "$pk"; else echo "${src#/dev/}"; fi
+          }
+          printf '{"data": "%s", "root": "%s"}\n' \
+            "$(parent_disk {{ validate_data_mount }})" "$(parent_disk /)"
+        executable: /bin/bash
+      register: validate_data_disks
+      changed_when: false
+
+    - name: assert the data mount is not backed by the root disk
+      ansible.builtin.assert:
+        that:
+          - validate_disks.data | length > 0
+          - validate_disks.data != validate_disks.root
+        fail_msg: >-
+          {{ validate_data_mount }} is backed by /dev/{{ validate_disks.data }},
+          which is also the disk carrying / on {{ inventory_hostname }}. The
+          data volume is not mounted -- something is reading and writing the
+          root disk under a path that is supposed to be the data volume.
+        success_msg: >-
+          {{ validate_data_mount }} is on /dev/{{ validate_disks.data }},
+          separate from the root disk /dev/{{ validate_disks.root }}
+      vars:
+        validate_disks: "{{ validate_data_disks.stdout | from_json }}"
+
+    - name: read fstab
+      ansible.builtin.slurp:
+        src: /etc/fstab
+      register: validate_fstab
+
+    # Mounted right now is not the same as mounted after the next reboot. A
+    # device-path entry can be correct today and wrong tomorrow, so the entry
+    # itself has to be a UUID.
+    - name: assert fstab records the data volume by uuid
+      ansible.builtin.assert:
+        that:
+          - validate_fstab_line | length > 0
+          - validate_fstab_line is search('^\s*UUID=')
+        fail_msg: >-
+          The /etc/fstab entry for {{ validate_data_mount }} on
+          {{ inventory_hostname }} is
+          {{ validate_fstab_line | default('missing', true) }}. It must name a
+          UUID: AWS NVMe device names are assigned in attach order and move
+          across reboots, so a device path here will eventually point at the
+          root disk.
+        success_msg: >-
+          fstab pins {{ validate_data_mount }} by UUID
+          ({{ validate_fstab_line.split() | first }})
+      vars:
+        validate_fstab_line: >-
+          {{ (validate_fstab.content | b64decode).splitlines()
+             | select('search', '^\s*[^#\s]\S*\s+'
+                      ~ (validate_data_mount | regex_escape) ~ '\s')
+             | first | default('') | trim }}
+
 - name: validate dns service
   hosts: role_services:role_registry:role_kvm
   gather_facts: false

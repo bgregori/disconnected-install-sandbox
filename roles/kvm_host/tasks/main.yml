@@ -31,6 +31,16 @@
       - python3-libvirt
     state: present
 
+# The data volume goes into fstab by UUID, never by device path. AWS NVMe
+# device names are handed out in attach order at boot, so the volume that is
+# /dev/nvme1n1 when this role formats it can come back as /dev/nvme0n1 after
+# the STIG remediation reboot -- which is where the root disk usually lands.
+# Combined with nofail (needed so a detached volume cannot wedge the boot)
+# that produces a host which comes up with no data mount and no error.
+# A UUID is a property of the filesystem, so re-enumeration cannot move it.
+#
+# Answers "is anything mounted here", nothing more. The device path it
+# returns feeds the UUID lookup below and never reaches fstab.
 - name: check if data volume is already mounted
   ansible.builtin.command:
     cmd: findmnt -n -o SOURCE {{ kvm_host_data_mount }}
@@ -62,15 +72,35 @@
 
 - name: create filesystem on data volume
   community.general.filesystem:
-    fstype: xfs
+    fstype: "{{ kvm_host_data_fstype }}"
     dev: "{{ kvm_host_data_device }}"
 
-- name: mount data volume
+# -c /dev/null skips the blkid cache, so a filesystem created one task ago is
+# probed off the device rather than read from a stale entry.
+# community.general.filesystem probes the same way internally.
+- name: read data volume uuid
+  ansible.builtin.command:
+    cmd: blkid -c /dev/null -s UUID -o value {{ kvm_host_data_device }}
+  register: kvm_host_data_blkid
+  changed_when: false
+
+- name: assert data volume uuid resolved
+  ansible.builtin.assert:
+    that:
+      - kvm_host_data_blkid.stdout | trim | length > 0
+    fail_msg: >-
+      blkid found no UUID on {{ kvm_host_data_device }}. Refusing to write an
+      fstab entry that would silently fail to mount at boot.
+    success_msg: >-
+      {{ kvm_host_data_device }} is
+      UUID={{ kvm_host_data_blkid.stdout | trim }}
+
+- name: mount data volume by uuid
   ansible.posix.mount:
     path: "{{ kvm_host_data_mount }}"
-    src: "{{ kvm_host_data_device }}"
-    fstype: xfs
-    opts: defaults,nodev,nofail
+    src: "UUID={{ kvm_host_data_blkid.stdout | trim }}"
+    fstype: "{{ kvm_host_data_fstype }}"
+    opts: "{{ kvm_host_data_mount_opts }}"
     state: mounted
 
 - name: mask modular libvirt daemons that conflict with libvirtd

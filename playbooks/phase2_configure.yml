@@ -57,13 +57,35 @@
         gpgcheck: false
 
 # Step 2.0.2: Format and mount registry data volume
+#
+# fstab records this volume by UUID, never by device path. AWS NVMe device
+# names are handed out in attach order at boot, so the data volume that is
+# /dev/nvme1n1 when this play formats it can come back as /dev/nvme0n1 after
+# the STIG remediation reboot a few plays down -- and /dev/nvme0n1 is where
+# the root disk usually lands. A device-path fstab entry then points /data at
+# the root disk, and because the entry is nofail (which it must be, so a
+# detached volume cannot wedge the boot) the host comes up quietly with no
+# /data at all and no error anywhere. Observed on a live sandbox 2026-10-12.
+#
+# A UUID belongs to the filesystem, not to the enumeration order, so it is
+# the only stable handle here. The device path is still fine for *finding*
+# the volume to format -- it just must not outlive this play.
 - name: prepare registry data volume
   hosts: role_registry
   gather_facts: false
+  vars:
+    phase2_registry_data_mount: /data
+    phase2_registry_data_fstype: xfs
+    # nodev matches what STIG remediation leaves on the mount; writing it
+    # here too keeps the module from stripping it back off on every re-run.
+    phase2_registry_data_opts: defaults,nofail,nodev
   tasks:
+    # Answers "is anything mounted here", nothing more. The device path it
+    # returns is only used to look the UUID up below, so its instability
+    # never reaches fstab.
     - name: check if data volume is already mounted
       ansible.builtin.command:
-        cmd: findmnt -n -o SOURCE /data
+        cmd: findmnt -n -o SOURCE {{ phase2_registry_data_mount }}
       register: phase2_registry_existing_mount
       changed_when: false
       failed_when: false
@@ -96,28 +118,48 @@
 
     - name: create filesystem on data volume
       community.general.filesystem:
-        fstype: xfs
+        fstype: "{{ phase2_registry_data_fstype }}"
         dev: "{{ phase2_registry_data_device }}"
+
+    # -c /dev/null skips the blkid cache, so a filesystem created one task
+    # ago is probed off the device rather than read from a stale entry.
+    # community.general.filesystem probes the same way internally.
+    - name: read data volume uuid
+      ansible.builtin.command:
+        cmd: blkid -c /dev/null -s UUID -o value {{ phase2_registry_data_device }}
+      register: phase2_registry_data_blkid
+      changed_when: false
+
+    - name: assert data volume uuid resolved
+      ansible.builtin.assert:
+        that:
+          - phase2_registry_data_blkid.stdout | trim | length > 0
+        fail_msg: >-
+          blkid found no UUID on {{ phase2_registry_data_device }}. Refusing to
+          write an fstab entry that would silently fail to mount at boot.
+        success_msg: >-
+          {{ phase2_registry_data_device }} is
+          UUID={{ phase2_registry_data_blkid.stdout | trim }}
 
     - name: create data mount point
       ansible.builtin.file:
-        path: /data
+        path: "{{ phase2_registry_data_mount }}"
         state: directory
         owner: root
         group: root
         mode: "0755"
 
-    - name: mount data volume
+    - name: mount data volume by uuid
       ansible.posix.mount:
-        path: /data
-        src: "{{ phase2_registry_data_device }}"
-        fstype: xfs
-        opts: defaults,nofail
+        path: "{{ phase2_registry_data_mount }}"
+        src: "UUID={{ phase2_registry_data_blkid.stdout | trim }}"
+        fstype: "{{ phase2_registry_data_fstype }}"
+        opts: "{{ phase2_registry_data_opts }}"
         state: mounted
 
     - name: set data directory ownership
       ansible.builtin.file:
-        path: /data
+        path: "{{ phase2_registry_data_mount }}"
         owner: ec2-user
         group: ec2-user
         mode: "0755"
