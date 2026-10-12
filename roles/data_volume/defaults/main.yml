@@ -1,0 +1,12 @@
+---
+# Absolute path to mount the volume at. No default is possible, and a wrong
+# guess here formats the wrong disk, so the role asserts instead of guessing.
+data_volume_mount: ""
+
+data_volume_fstype: xfs
+
+# nofail so a detached volume cannot wedge the boot, nodev because this never
+# holds device nodes and STIG remediation adds it anyway. The module compares
+# this string literally, so callers whose fstab already differs only in option
+# ORDER should pass their existing string rather than let it be rewritten.
+data_volume_opts: defaults,nofail,nodev

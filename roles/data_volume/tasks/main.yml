@@ -1,0 +1,99 @@
+---
+# Puts a formatted EBS data volume at data_volume_mount and records it in
+# fstab by UUID.
+#
+# The reason this is a role rather than two copies: AWS assigns NVMe device
+# names in attach order at boot, so they move across reboots. The volume that
+# is /dev/nvme1n1 when this role formats it can come back as /dev/nvme0n1
+# after the STIG remediation reboot, and that is usually the root disk. A
+# device path in fstab therefore points the mount at the root disk, and
+# because the entry is nofail the host boots quietly with no data volume and
+# no error -- found only when something downstream goes looking. A UUID
+# belongs to the filesystem, so re-enumeration cannot move it.
+#
+# Device paths are still fine for deciding what to format. They just must not
+# outlive this role.
+#
+# Callers own the mount point directory and its ownership: the registry wants
+# /data handed to ec2-user, while the kvm host mounts over a directory libvirt
+# already created with its own permissions.
+
+- name: assert a mount point was provided
+  ansible.builtin.assert:
+    that:
+      - data_volume_mount | length > 0
+    fail_msg: >-
+      data_volume_mount must be set by the caller. Without it the device
+      search below has nothing to check against and could format a disk that
+      is already in use.
+    quiet: true
+
+# Answers "is anything mounted here", nothing more. The device path it returns
+# feeds the UUID lookup below and never reaches fstab.
+- name: check if data volume is already mounted
+  ansible.builtin.command:
+    cmd: findmnt -n -o SOURCE {{ data_volume_mount }}
+  register: data_volume_existing_mount
+  changed_when: false
+  failed_when: false
+
+# First whole disk with nothing mounted anywhere on it. The root disk is
+# excluded because its partitions carry / and /boot.
+- name: find data volume device
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      lsblk -dn -o NAME,TYPE | awk '$2 == "disk" {print "/dev/" $1}' | while read dev; do
+        if ! lsblk -n -o MOUNTPOINTS "$dev" 2>/dev/null | grep -q '/'; then
+          echo "$dev"; break
+        fi
+      done
+    executable: /bin/bash
+  register: data_volume_detected
+  changed_when: false
+  failed_when: data_volume_detected.stdout | length == 0
+  when: data_volume_existing_mount.rc != 0
+
+- name: set data device fact
+  ansible.builtin.set_fact:
+    data_volume_device: >-
+      {{ data_volume_existing_mount.stdout | trim
+         if data_volume_existing_mount.rc == 0
+         else data_volume_detected.stdout }}
+
+- name: show detected data volume
+  ansible.builtin.debug:
+    msg: "{{ data_volume_mount }} will use {{ data_volume_device }}"
+
+- name: create filesystem on data volume
+  community.general.filesystem:
+    fstype: "{{ data_volume_fstype }}"
+    dev: "{{ data_volume_device }}"
+
+# -c /dev/null skips the blkid cache, so a filesystem created one task ago is
+# probed off the device rather than read from a stale entry.
+# community.general.filesystem probes the same way internally.
+- name: read data volume uuid
+  ansible.builtin.command:
+    cmd: blkid -c /dev/null -s UUID -o value {{ data_volume_device }}
+  register: data_volume_blkid
+  changed_when: false
+
+- name: assert data volume uuid resolved
+  ansible.builtin.assert:
+    that:
+      - data_volume_blkid.stdout | trim | length > 0
+    fail_msg: >-
+      blkid found no UUID on {{ data_volume_device }}. Refusing to write an
+      fstab entry that would silently fail to mount at boot.
+    success_msg: >-
+      {{ data_volume_device }} is
+      UUID={{ data_volume_blkid.stdout | trim }}
+
+- name: mount data volume by uuid
+  ansible.posix.mount:
+    path: "{{ data_volume_mount }}"
+    src: "UUID={{ data_volume_blkid.stdout | trim }}"
+    fstype: "{{ data_volume_fstype }}"
+    opts: "{{ data_volume_opts }}"
+    state: mounted

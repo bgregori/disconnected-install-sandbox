@@ -1,8 +1,8 @@
 ---
-# Fallback only. tasks/main.yml detects the real device at run time, because
-# AWS NVMe names depend on attach order and are not stable across reboots.
-# Nothing is written to fstab by device path -- see the UUID lookup there.
-kvm_host_data_device: /dev/nvme1n1
+# Data volume. The device is NOT configurable here on purpose: the
+# data_volume role detects it at run time, because AWS NVMe names depend on
+# attach order and are not stable across reboots. Only the UUID it resolves
+# reaches fstab.
 kvm_host_data_mount: /var/lib/libvirt/images
 kvm_host_data_fstype: xfs
 kvm_host_data_mount_opts: defaults,nodev,nofail
