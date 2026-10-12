@@ -25,7 +25,9 @@ EnvironmentFile={{ keycloak_idp_conf_dir }}/postgres.env
 # permanently committed to running as.
 Volume={{ keycloak_idp_pgdata_dir }}:/var/lib/pgsql/data:Z
 
-Memory={{ keycloak_idp_postgres_memory }}
+# Via PodmanArgs: Quadlet has no memory key, and an unsupported key makes the
+# generator reject the whole file. See the note in keycloak.container.j2.
+PodmanArgs=--memory={{ keycloak_idp_postgres_memory }}
 
 HealthCmd=pg_isready -U {{ keycloak_idp_db_user }} -d {{ keycloak_idp_db_name }}
 HealthRetries=5

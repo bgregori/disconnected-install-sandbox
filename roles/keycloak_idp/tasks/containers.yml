@@ -50,6 +50,45 @@
     daemon_reload: true
   when: keycloak_idp_units is changed
 
+# Quadlet rejects an entire .container file if it contains one key it does not
+# recognise, and says so only on stderr during generation. systemd is then
+# simply unaware of the unit, and the next task fails with "Could not find the
+# requested service", which points nowhere near the actual cause. Ask the
+# generator directly and surface its own error message instead.
+# systemctl rather than the systemd module: the module can start or stop a
+# unit but cannot answer "does this unit exist", and asking it would fail with
+# the same unhelpful message this check exists to replace.
+- name: check that quadlet generated both container units # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: systemctl cat {{ item }}
+  loop:
+    - "{{ keycloak_idp_postgres_service }}"
+    - "{{ keycloak_idp_service }}"
+  register: keycloak_idp_unit_check
+  changed_when: false
+  failed_when: false
+
+- name: report what quadlet made of the unit files
+  ansible.builtin.command:
+    cmd: /usr/libexec/podman/quadlet -dryrun
+  register: keycloak_idp_quadlet_dryrun
+  changed_when: false
+  failed_when: false
+  when: keycloak_idp_unit_check.results | selectattr('rc', 'ne', 0) | list | length > 0
+
+- name: assert quadlet generated both container units
+  ansible.builtin.assert:
+    that:
+      - keycloak_idp_unit_check.results | selectattr('rc', 'ne', 0) | list | length == 0
+    fail_msg: >-
+      Quadlet did not generate
+      {{ keycloak_idp_unit_check.results | selectattr('rc', 'ne', 0)
+         | map(attribute='item') | join(', ') }}
+      from {{ keycloak_idp_quadlet_dir }}. The generator usually rejects a
+      whole file over a single unsupported key. It reported:
+      {{ keycloak_idp_quadlet_dryrun.stderr | default('(no output)') | trim }}
+    success_msg: "quadlet generated both container units"
+
 # No `enabled: true` on either of these. Quadlet units are transient and
 # cannot be systemctl-enabled -- `[Install] WantedBy=multi-user.target` in
 # the .container file is what makes them start at boot, and it is applied

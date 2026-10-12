@@ -63,7 +63,13 @@ EnvironmentFile={{ keycloak_idp_conf_dir }}/keycloak.env
 
 # The image sizes its heap at 70% of whatever memory it can see. Without a
 # limit that is the whole host, which also runs BIND and chrony.
-Memory={{ keycloak_idp_memory }}
+#
+# Via PodmanArgs because Quadlet has no memory key -- `Memory=` is NOT valid
+# here. An unsupported key makes the generator reject the WHOLE file, so the
+# unit is never created and the only symptom is systemd reporting no such
+# service. Check any new key against `podman-systemd.unit(5)` or
+# `/usr/libexec/podman/quadlet -dryrun` before adding it.
+PodmanArgs=--memory={{ keycloak_idp_memory }}
 
 # No HealthCmd here on purpose: the server image is built on UBI Micro and
 # ships no curl, wget or shell to probe itself with. Readiness is checked
