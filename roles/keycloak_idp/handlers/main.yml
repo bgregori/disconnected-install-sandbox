@@ -3,15 +3,26 @@
 # back before Keycloak retries its connection. The systemd daemon-reload that
 # regenerates the Quadlet units is a task, not a handler, because the units
 # have to exist before anything in containers.yml can reference them.
+#
+# scope: user throughout -- these are rootless containers owned by the
+# service user's systemd manager, not the system one.
 - name: restart keycloak postgres
   ansible.builtin.systemd:
     name: "{{ keycloak_idp_postgres_service }}"
+    scope: user
     state: restarted
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
+  environment: "{{ keycloak_idp_user_env }}"
 
 - name: restart keycloak
   ansible.builtin.systemd:
     name: "{{ keycloak_idp_service }}"
+    scope: user
     state: restarted
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
+  environment: "{{ keycloak_idp_user_env }}"
 
 - name: update ca trust
   ansible.builtin.command:

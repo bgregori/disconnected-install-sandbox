@@ -3,13 +3,17 @@
 # were pulled on the bastion and `podman save`d into the same httpd document
 # root that already serves the local yum repo, so getting them here is a
 # plain HTTP fetch over the one path out of the private subnet that exists.
+#
+# Everything below runs as the service user: a rootless podman keeps its
+# image store in that user's home, so images loaded as root would be
+# invisible to the containers.
 
 - name: download the container image archives from the bastion
   ansible.builtin.get_url:
     url: "{{ keycloak_idp_image_base_url }}/{{ item.archive }}"
     dest: "{{ keycloak_idp_image_dir }}/{{ item.archive }}"
-    owner: root
-    group: root
+    owner: "{{ keycloak_idp_user }}"
+    group: "{{ keycloak_idp_user }}"
     mode: "0644"
   loop: "{{ keycloak_idp_image_archives }}"
   loop_control:
@@ -19,6 +23,8 @@
 - name: check which images are already in podman storage
   ansible.builtin.command:
     cmd: "podman image exists {{ item.image }}"
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
   loop: "{{ keycloak_idp_image_archives }}"
   loop_control:
     label: "{{ item.image }}"
@@ -32,6 +38,8 @@
 - name: load the images into podman storage
   ansible.builtin.command:
     cmd: "podman load --input {{ keycloak_idp_image_dir }}/{{ item.1.item.archive }}"
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
   loop: "{{ keycloak_idp_image_present.results | zip(keycloak_idp_image_download.results) | list }}"
   loop_control:
     label: "{{ item.1.item.image }}"
@@ -41,6 +49,8 @@
 - name: re-check podman storage after loading
   ansible.builtin.command:
     cmd: "podman image exists {{ item.image }}"
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
   loop: "{{ keycloak_idp_image_archives }}"
   loop_control:
     label: "{{ item.image }}"
@@ -53,9 +63,9 @@
     that:
       - item.rc == 0
     fail_msg: >-
-      {{ item.item.image }} is still missing from podman storage after loading
-      {{ item.item.archive }}. Check that the bastion saved the archive under
-      the name the image expects.
+      {{ item.item.image }} is still missing from {{ keycloak_idp_user }}'s
+      podman storage after loading {{ item.item.archive }}. Check that the
+      bastion saved the archive under the name the image expects.
     success_msg: "{{ item.item.image }} is in podman storage"
   loop: "{{ keycloak_idp_image_final.results }}"
   loop_control:

@@ -1,14 +1,30 @@
 ---
-# python3-cryptography is community.crypto's backend. tls.yml builds the
-# issuer CA and the serving certificate with openssl_privatekey, openssl_csr
-# and x509_certificate, all of which import it on the TARGET host -- and the
-# RHEL 9 image does not ship it. Installing it here rather than discovering
-# the gap in tls.yml, which fails after this role has already written
-# directories and fapolicyd rules.
+# ROOTLESS, and that is not a style preference.
 #
-# podman is usually already present from the base image, but it is named
-# anyway so a host without it is served from the bastion repo rather than
-# failing at the first container. bastion_repo mirrors both packages.
+# On the STIG'd hosts in this sandbox a rootful container cannot start at all:
+# `crun --version` run as root dies with
+#
+#   error while loading shared libraries: libsystemd.so.0:
+#   cannot open shared object file: Operation not permitted
+#
+# while the same binary run as ec2-user prints its version. Measured
+# 2026-10-12 on all four hosts. The cause was not identified -- fapolicyd has
+# the documented allowances loaded, crun and libsystemd are both in its trust
+# database, its compiled ruleset contains `allow perm=open all : all`, SELinux
+# is exonerated (it fails identically under runcon -t unconfined_t), and no
+# subsystem logs an audit record. Root is simply more restricted than an
+# unprivileged user here.
+#
+# Rootless is also the proven pattern on this fleet rather than a guess: the
+# registry host runs Quay, PostgreSQL and Redis as rootless ec2-user
+# containers on an equally hardened host.
+#
+# Consequences that shaped the rest of this role: units live under the user's
+# ~/.config/containers/systemd, systemd calls need scope=user, the user needs
+# lingering so the units survive logout and come back at boot, and the
+# PostgreSQL image's UID 26 maps through the user's subuid range rather than
+# being a real host UID.
+
 - name: install container and crypto tooling from the bastion local repo
   ansible.builtin.dnf:
     name:
@@ -16,10 +32,48 @@
       - python3-cryptography
     state: present
 
+# Resolved here, not in containers.yml, because tls.yml notifies the restart
+# handlers before containers.yml ever runs -- and those handlers need this.
+- name: read the service user's uid
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ keycloak_idp_user }}"
+
+- name: set the user systemd environment
+  ansible.builtin.set_fact:
+    keycloak_idp_user_env:
+      XDG_RUNTIME_DIR: "/run/user/{{ getent_passwd[keycloak_idp_user][1] }}"
+
+# Fail here rather than three task files later. Everything between this and
+# the first container start writes real state -- a CA, a serving certificate,
+# generated secrets, a rendered realm -- and discovering the runtime is
+# unusable after all that is what made this role so slow to debug.
+- name: check the container runtime actually works for the service user
+  ansible.builtin.command:
+    cmd: "{{ keycloak_idp_runtime_probe }}"
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
+  register: keycloak_idp_runtime_check
+  changed_when: false
+  failed_when: false
+
+- name: assert the container runtime is usable
+  ansible.builtin.assert:
+    that:
+      - keycloak_idp_runtime_check.rc == 0
+    fail_msg: >-
+      The OCI runtime will not start as {{ keycloak_idp_user }} on
+      {{ inventory_hostname }}: {{ keycloak_idp_runtime_check.stderr
+      | default(keycloak_idp_runtime_check.stdout) | default('no output') | trim }}.
+      Nothing below can work until that does. On a STIG'd host this is usually
+      fapolicyd -- see roles/rhel_hardening/tasks/oci_runtime.yml -- and
+      `fapolicyd --debug-deny --permissive` names the rule responsible.
+    success_msg: "OCI runtime usable as {{ keycloak_idp_user }}"
+
 # Quadlet -- systemd units generated from .container files -- arrived in
 # podman 4.4 (RHEL 9.2). Everything below is written as Quadlet units, so an
 # older podman would silently generate nothing at all: the files would sit in
-# /etc/containers/systemd and systemctl would report no such unit. Fail here
+# the quadlet directory and systemctl would report no such unit. Fail here
 # with the version instead.
 - name: read the installed podman version
   ansible.builtin.command:
@@ -36,18 +90,26 @@
       does not support Quadlet (.container units), which needs 4.4 or newer.
     success_msg: "podman {{ keycloak_idp_podman_version.stdout.split()[2] }} supports Quadlet"
 
+# Without lingering the user manager stops at logout and takes the containers
+# with it, and nothing starts at boot -- [Install] WantedBy=default.target in
+# a user unit only means anything while that manager is running.
+- name: enable lingering so the user units survive logout and reboot
+  ansible.builtin.command:
+    cmd: loginctl enable-linger {{ keycloak_idp_user }}
+    creates: "/var/lib/systemd/linger/{{ keycloak_idp_user }}"
+
 - name: create keycloak directories
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
-    owner: root
-    group: root
+    owner: "{{ keycloak_idp_user }}"
+    group: "{{ keycloak_idp_user }}"
     mode: "{{ item.mode }}"
   loop:
     - path: "{{ keycloak_idp_conf_dir }}"
       mode: "0755"
-    # Mounted into the container, which runs as UID 1000 in group 0, so the
-    # directories themselves have to be traversable by that group.
+    # Read inside the container as UID 1000 in group 0, which maps back to
+    # the service user itself under rootless, so owner access is enough.
     - path: "{{ keycloak_idp_container_cert_dir }}"
       mode: "0750"
     - path: "{{ keycloak_idp_import_dir }}"
@@ -62,68 +124,25 @@
     label: "{{ item.path }}"
 
 # The PostgreSQL image is hard-committed to UID 26 -- the upstream Dockerfile
-# says so in as many words and has a test enforcing it -- and it writes to
-# this directory. :Z on the mount fixes the SELinux label but not the owner.
-- name: create the postgres data directory owned by the image uid
+# says so in as many words and has a test enforcing it -- and it writes here.
+#
+# Rootless changes what that means on the host. Container UID 26 is not host
+# UID 26; it maps to the 26th entry of the service user's subuid range, so the
+# directory has to be chowned to that mapped ID. podman unshare runs the chown
+# inside the user namespace, which does the translation for us -- doing the
+# arithmetic by hand against /etc/subuid is the usual way to get this wrong.
+- name: create the postgres data directory
   ansible.builtin.file:
     path: "{{ keycloak_idp_pgdata_dir }}"
     state: directory
-    owner: "26"
-    group: "0"
+    owner: "{{ keycloak_idp_user }}"
+    group: "{{ keycloak_idp_user }}"
     mode: "0700"
 
-# fapolicyd "does not fully support namespaces and containers" (RHEL 9
-# Security Hardening, ch. 13). Without this the OCI runtime cannot load its
-# own shared libraries and every container start dies with
-#
-#   crun: error while loading shared libraries: libsystemd.so.0:
-#   cannot open shared object file: Operation not permitted
-#
-# The runc rules are Red Hat's documented workaround, quoted verbatim; the
-# crun pair is the same workaround with the exe path swapped, which is what
-# the matching Customer Portal solution (7072618) says to do -- crun, not
-# runc, is the default OCI runtime on RHEL 9.
-#
-# STIG installs and enables fapolicyd, so on a hardened host this must land
-# before anything tries to start a container.
-- name: create the fapolicyd rules directory
-  ansible.builtin.file:
-    path: /etc/fapolicyd/rules.d
-    state: directory
-    owner: root
-    group: root
-    mode: "0750"
-
-- name: allow the oci runtime to load its libraries under fapolicyd
-  ansible.builtin.copy:
-    content: |
-      allow perm=any pattern=ld_so exe=/usr/bin/runc : all
-      allow perm=any uid=0 pattern=ld_so exe=/runc : trust=1
-      allow perm=any pattern=ld_so exe=/usr/bin/crun : all
-      allow perm=any uid=0 pattern=ld_so exe=/crun : trust=1
-    dest: /etc/fapolicyd/rules.d/25-oci-runtime.rules
-    owner: root
-    group: root
-    mode: "0644"
-  register: keycloak_idp_fapolicyd_rules
-
-- name: check whether fapolicyd is installed
-  ansible.builtin.stat:
-    path: /usr/sbin/fapolicyd
-  register: keycloak_idp_fapolicyd_binary
-
-# rules.d is only source text -- fapolicyd reads the compiled
-# /etc/fapolicyd/compiled.rules, which fagenrules regenerates. Skipping this
-# leaves the rules written but inert. If fapolicyd is not installed yet the
-# package's own post-install will compile them.
-- name: compile and reload the fapolicyd rules # noqa: no-handler
-  ansible.builtin.shell:
-    cmd: |
-      set -o pipefail
-      fagenrules --load
-      fapolicyd-cli --reload-rules
-    executable: /bin/bash
-  when:
-    - keycloak_idp_fapolicyd_rules is changed
-    - keycloak_idp_fapolicyd_binary.stat.exists
-  changed_when: true
+- name: map the postgres data directory to the image uid inside the user namespace
+  ansible.builtin.command:
+    cmd: podman unshare chown -R {{ keycloak_idp_postgres_uid }}:0 {{ keycloak_idp_pgdata_dir }}
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
+  register: keycloak_idp_pgdata_chown
+  changed_when: keycloak_idp_pgdata_chown.rc == 0

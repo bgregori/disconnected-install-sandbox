@@ -1,6 +1,6 @@
 ---
 # RHBK reads every top-level *.json in /opt/keycloak/data/import when started
-# with --import-realm. Mode 0640 root:root: the file carries the realm
+# with --import-realm. Mode 0600, owned by the rootless service user: the file carries the realm
 # admin's password, the demo users' passwords and the OIDC client secret, and
 # the container reads it as UID 1000 in group 0.
 #
@@ -16,9 +16,9 @@
   ansible.builtin.template:
     src: openshift-realm.json.j2
     dest: "{{ keycloak_idp_import_dir }}/{{ keycloak_idp_realm }}-realm.json"
-    owner: root
-    group: root
-    mode: "0640"
+    owner: "{{ keycloak_idp_user }}"
+    group: "{{ keycloak_idp_user }}"
+    mode: "0600"
   no_log: true
   register: keycloak_idp_realm_file
 

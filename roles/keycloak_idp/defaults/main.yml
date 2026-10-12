@@ -48,20 +48,42 @@ keycloak_idp_image_archives: "{{ keycloak_image_archives }}"
 keycloak_idp_image_base_url: >-
   http://{{ bastion_private_ip }}:{{ bastion_repo_port }}/{{ bastion_repo_container_dir_name }}
 
-# Paths on the services host
-keycloak_idp_conf_dir: /etc/keycloak
-keycloak_idp_secret_dir: /etc/keycloak/secrets
-keycloak_idp_container_cert_dir: /etc/keycloak/certs
-keycloak_idp_import_dir: /etc/keycloak/import
-keycloak_idp_state_dir: /var/lib/keycloak
-keycloak_idp_pgdata_dir: /var/lib/keycloak/pgdata
-keycloak_idp_image_dir: /var/lib/keycloak/images
+# Rootless service account. Rootful containers do not start on these STIG'd
+# hosts -- see the note at the top of tasks/prepare.yml. ec2-user matches the
+# registry host, which runs Quay rootless under the same account.
+keycloak_idp_user: ec2-user
+keycloak_idp_home: "/home/{{ keycloak_idp_user }}"
+
+# Cheapest honest answer to "can this user start a container at all". crun
+# failing to load its own libraries is exactly the failure this guards.
+keycloak_idp_runtime_probe: /usr/bin/crun --version
+
+# The PostgreSQL image is committed to running as UID 26. Rootless, that is a
+# container UID mapped through the service user's subuid range, not a host UID.
+keycloak_idp_postgres_uid: 26
+
+# Paths on the services host. Everything the containers touch lives under the
+# service user, because a rootless podman runs as that user and its systemd
+# manager reads the unit and environment files as that user too.
+keycloak_idp_conf_dir: "{{ keycloak_idp_home }}/keycloak"
+keycloak_idp_secret_dir: "{{ keycloak_idp_conf_dir }}/secrets"
+keycloak_idp_container_cert_dir: "{{ keycloak_idp_conf_dir }}/certs"
+keycloak_idp_import_dir: "{{ keycloak_idp_conf_dir }}/import"
+keycloak_idp_state_dir: "{{ keycloak_idp_conf_dir }}/state"
+keycloak_idp_pgdata_dir: "{{ keycloak_idp_state_dir }}/pgdata"
+keycloak_idp_image_dir: "{{ keycloak_idp_state_dir }}/images"
+
+# PKI stays root-owned under /etc/pki: keycloak_ca_cert_path in all.yml is a
+# published location that validate.yml and the consuming cluster read, and the
+# CA private key has no business in a service account's home. Only copies of
+# the serving cert and key are staged into the user's cert dir below.
 keycloak_idp_pki_dir: /etc/pki/keycloak
 keycloak_idp_ca_cert_path: "{{ keycloak_ca_cert_path }}"
 keycloak_idp_ca_key_path: "{{ keycloak_idp_pki_dir }}/keycloak-ca.key"
 keycloak_idp_tls_cert_path: "{{ keycloak_idp_pki_dir }}/keycloak.crt"
 keycloak_idp_tls_key_path: "{{ keycloak_idp_pki_dir }}/keycloak.key"
-keycloak_idp_quadlet_dir: /etc/containers/systemd
+# Rootless Quadlet reads from the user's config dir, not /etc/containers.
+keycloak_idp_quadlet_dir: "{{ keycloak_idp_home }}/.config/containers/systemd"
 
 # Where the CA lands on the operator's workstation. The cluster consumes it
 # as a ConfigMap, so it has to leave the air-gapped host somehow.

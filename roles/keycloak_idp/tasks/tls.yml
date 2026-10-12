@@ -98,16 +98,17 @@
     mode: "0644"
   notify: restart keycloak
 
-# The container reads these, and it does not run as root. Red Hat container
-# images run as an arbitrary UID in group 0, so group-readable with group root
-# is what the key needs -- 0600 would lock the server out of its own key.
+# Copies, not the originals: the CA private key stays root-owned in
+# /etc/pki/keycloak, while the container needs to read the serving pair as the
+# rootless service user. Container UID 1000 in group 0 maps back to that user
+# under rootless, so plain owner access is enough and the key stays 0600.
 - name: stage serving material where the container can read it
   ansible.builtin.copy:
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
     remote_src: true
-    owner: root
-    group: root
+    owner: "{{ keycloak_idp_user }}"
+    group: "{{ keycloak_idp_user }}"
     mode: "{{ item.mode }}"
   loop:
     - src: "{{ keycloak_idp_tls_cert_path }}"
@@ -115,7 +116,7 @@
       mode: "0644"
     - src: "{{ keycloak_idp_tls_key_path }}"
       dest: "{{ keycloak_idp_container_cert_dir }}/tls.key"
-      mode: "0640"
+      mode: "0600"
   loop_control:
     label: "{{ item.dest }}"
   notify: restart keycloak

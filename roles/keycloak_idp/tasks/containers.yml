@@ -1,14 +1,20 @@
 ---
+# All systemd work here is against the SERVICE USER's manager, not the system
+# one. The ansible systemd module needs two things for that: scope=user, and
+# XDG_RUNTIME_DIR pointing at the user's runtime directory -- without the
+# latter it cannot find the user bus and fails with a connection error that
+# says nothing about the real problem.
+
 # Passwords go in EnvironmentFiles rather than Environment= lines so the
-# Quadlet units stay readable by anyone who can read /etc/containers/systemd
+# Quadlet units stay readable by anyone who can read the quadlet directory
 # without handing them the database and the bootstrap admin account.
 - name: write the postgres environment file
   ansible.builtin.copy:
     content: |
       POSTGRESQL_PASSWORD={{ keycloak_idp_secrets['db-password'] }}
     dest: "{{ keycloak_idp_conf_dir }}/postgres.env"
-    owner: root
-    group: root
+    owner: "{{ keycloak_idp_user }}"
+    group: "{{ keycloak_idp_user }}"
     mode: "0600"
   no_log: true
   notify: restart keycloak postgres
@@ -19,8 +25,8 @@
       KC_DB_PASSWORD={{ keycloak_idp_secrets['db-password'] }}
       KC_BOOTSTRAP_ADMIN_PASSWORD={{ keycloak_idp_secrets['bootstrap-admin-password'] }}
     dest: "{{ keycloak_idp_conf_dir }}/keycloak.env"
-    owner: root
-    group: root
+    owner: "{{ keycloak_idp_user }}"
+    group: "{{ keycloak_idp_user }}"
     mode: "0600"
   no_log: true
   notify: restart keycloak
@@ -29,8 +35,8 @@
   ansible.builtin.template:
     src: "{{ item }}.j2"
     dest: "{{ keycloak_idp_quadlet_dir }}/{{ item }}"
-    owner: root
-    group: root
+    owner: "{{ keycloak_idp_user }}"
+    group: "{{ keycloak_idp_user }}"
     mode: "0644"
   loop:
     - keycloak.network
@@ -42,12 +48,16 @@
     - restart keycloak
 
 # Quadlet is a systemd generator: the .container files above become units
-# only when systemd re-runs its generators. Nothing below can reference
-# {{ keycloak_idp_service }} until this has happened, which is why it is a
-# task and not a handler.
-- name: reload systemd so quadlet generates the units # noqa: no-handler
+# only when the user's systemd re-runs its generators. Nothing below can
+# reference {{ keycloak_idp_service }} until this has happened, which is why
+# it is a task and not a handler.
+- name: reload the user systemd so quadlet generates the units # noqa: no-handler
   ansible.builtin.systemd:
     daemon_reload: true
+    scope: user
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
+  environment: "{{ keycloak_idp_user_env }}"
   when: keycloak_idp_units is changed
 
 # Quadlet rejects an entire .container file if it contains one key it does not
@@ -55,12 +65,16 @@
 # simply unaware of the unit, and the next task fails with "Could not find the
 # requested service", which points nowhere near the actual cause. Ask the
 # generator directly and surface its own error message instead.
+#
 # systemctl rather than the systemd module: the module can start or stop a
 # unit but cannot answer "does this unit exist", and asking it would fail with
 # the same unhelpful message this check exists to replace.
 - name: check that quadlet generated both container units # noqa: command-instead-of-module
   ansible.builtin.command:
-    cmd: systemctl cat {{ item }}
+    cmd: systemctl --user cat {{ item }}
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
+  environment: "{{ keycloak_idp_user_env }}"
   loop:
     - "{{ keycloak_idp_postgres_service }}"
     - "{{ keycloak_idp_service }}"
@@ -70,7 +84,10 @@
 
 - name: report what quadlet made of the unit files
   ansible.builtin.command:
-    cmd: /usr/libexec/podman/quadlet -dryrun
+    cmd: /usr/libexec/podman/quadlet -dryrun -user
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
+  environment: "{{ keycloak_idp_user_env }}"
   register: keycloak_idp_quadlet_dryrun
   changed_when: false
   failed_when: false
@@ -90,19 +107,27 @@
     success_msg: "quadlet generated both container units"
 
 # No `enabled: true` on either of these. Quadlet units are transient and
-# cannot be systemctl-enabled -- `[Install] WantedBy=multi-user.target` in
-# the .container file is what makes them start at boot, and it is applied
-# when the generator runs.
+# cannot be systemctl-enabled -- `[Install] WantedBy=default.target` in the
+# .container file is what makes them start with the user manager, and it is
+# applied when the generator runs. Lingering (set in prepare.yml) is what
+# starts that manager at boot.
 - name: start the postgres container
   ansible.builtin.systemd:
     name: "{{ keycloak_idp_postgres_service }}"
+    scope: user
     state: started
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
+  environment: "{{ keycloak_idp_user_env }}"
 
 - name: wait for postgres to accept connections
   ansible.builtin.command:
     cmd: >-
       podman exec {{ keycloak_idp_postgres_container_name }}
       pg_isready -U {{ keycloak_idp_db_user }} -d {{ keycloak_idp_db_name }}
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
+  environment: "{{ keycloak_idp_user_env }}"
   register: keycloak_idp_pg_ready
   retries: 30
   delay: 5
@@ -112,7 +137,11 @@
 - name: start keycloak
   ansible.builtin.systemd:
     name: "{{ keycloak_idp_service }}"
+    scope: user
     state: started
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
+  environment: "{{ keycloak_idp_user_env }}"
 
 # Pick up any restart queued by a changed certificate, environment file or
 # unit before the verification tasks start probing the server.

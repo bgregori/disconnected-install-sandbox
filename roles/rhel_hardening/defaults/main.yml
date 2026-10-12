@@ -11,5 +11,12 @@ rhel_hardening_audit_admin_space_left_action: SYSLOG
 rhel_hardening_reboot_timeout: 1200
 rhel_hardening_firewall_ports: []
 
+# Write Red Hat's documented fapolicyd allowances for the OCI runtime after
+# STIG remediation. Every containerised workload on a hardened host needs
+# these, so they belong with the hardening rather than in a workload role.
+# See tasks/oci_runtime.yml for what they are and what is NOT proven about
+# them. Set false to leave fapolicyd exactly as STIG configured it.
+rhel_hardening_allow_oci_runtime: true
+
 # Bastion repo for air-gapped package installation
 rhel_hardening_bastion_repo_url: "http://{{ bastion_private_ip }}:{{ bastion_repo_port }}/rhel9-local"

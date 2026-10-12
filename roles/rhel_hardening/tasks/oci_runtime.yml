@@ -1,0 +1,70 @@
+---
+# fapolicyd arrives with STIG remediation, and it is hostile to container
+# runtimes: Red Hat's own hardening guide (RHEL 9, ch. 13) says fapolicyd
+# "does not fully support namespaces and containers". The documented symptom
+# is the OCI runtime failing to load its own shared libraries:
+#
+#   crun: error while loading shared libraries: libsystemd.so.0:
+#   cannot open shared object file: Operation not permitted
+#
+# This lives here rather than in a workload role because every containerised
+# workload on a hardened host needs it, not just the one that happened to hit
+# it first. It is applied whenever STIG is, so the rules are in place before
+# anything tries to start a container.
+#
+# HONEST CAVEAT, 2026-10-12: these rules are Red Hat's documented workaround
+# and they are NOT proven to fix the failure above on this fleet. On a STIG'd
+# host here, `crun --version` fails as root and succeeds as an unprivileged
+# user, with the rules loaded and compiled, with crun and libsystemd both in
+# fapolicyd's trust database, and with no audit record from any subsystem.
+# The compiled ruleset also contains `allow perm=open all : all`, which should
+# make an open impossible to deny. So the real cause of the rootful failure is
+# still unidentified -- see the rootless note in roles/keycloak_idp. Keeping
+# the rules because they are the documented guidance and cost nothing; do not
+# assume they are what makes containers work.
+
+- name: create the fapolicyd rules directory
+  ansible.builtin.file:
+    path: /etc/fapolicyd/rules.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+# The runc rules are Red Hat's documented workaround, quoted verbatim; the
+# crun pair is the same workaround with the exe path swapped, which is what
+# the matching Customer Portal solution (7072618) says to do -- crun, not
+# runc, is the default OCI runtime on RHEL 9.
+- name: allow the oci runtime to load its libraries under fapolicyd
+  ansible.builtin.copy:
+    content: |
+      allow perm=any pattern=ld_so exe=/usr/bin/runc : all
+      allow perm=any uid=0 pattern=ld_so exe=/runc : trust=1
+      allow perm=any pattern=ld_so exe=/usr/bin/crun : all
+      allow perm=any uid=0 pattern=ld_so exe=/crun : trust=1
+    dest: /etc/fapolicyd/rules.d/25-oci-runtime.rules
+    owner: root
+    group: root
+    mode: "0644"
+  register: rhel_hardening_fapolicyd_rules
+
+- name: check whether fapolicyd is installed
+  ansible.builtin.stat:
+    path: /usr/sbin/fapolicyd
+  register: rhel_hardening_fapolicyd_binary
+
+# rules.d is only source text -- fapolicyd reads the compiled
+# /etc/fapolicyd/compiled.rules, which fagenrules regenerates. Skipping this
+# leaves the rules written but inert. If fapolicyd is not installed yet the
+# package's own post-install will compile them.
+- name: compile and reload the fapolicyd rules # noqa: no-handler
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      fagenrules --load
+      fapolicyd-cli --reload-rules
+    executable: /bin/bash
+  when:
+    - rhel_hardening_fapolicyd_rules is changed
+    - rhel_hardening_fapolicyd_binary.stat.exists
+  changed_when: true

@@ -6,3 +6,11 @@
 - name: include stig application
   ansible.builtin.include_tasks: stig.yml
   when: rhel_hardening_apply_stig
+
+# After stig.yml, because that is what installs and enables fapolicyd --
+# there is nothing to write rules for until it has run.
+- name: include oci runtime allowances for fapolicyd
+  ansible.builtin.include_tasks: oci_runtime.yml
+  when:
+    - rhel_hardening_apply_stig
+    - rhel_hardening_allow_oci_runtime | bool
