@@ -184,13 +184,19 @@
     # s_client rather than curl: it reports the verify result for the chain
     # the server actually presented, so a server using a self-signed or
     # stale certificate is caught even if the request itself would succeed.
+    #
+    # The leading-space tolerance in the grep is load-bearing. OpenSSL
+    # prints "Verify return code" unindented for TLS 1.3 but indented four
+    # spaces inside the SSL-Session block for TLS 1.2 -- so an anchored
+    # pattern silently passes the TLS 1.3 endpoints and fails the TLS 1.2
+    # one, which is exactly what the Redfish BMC negotiates.
     - name: verify each tls endpoint presents a chain to the sandbox root
       ansible.builtin.shell:
         cmd: |
           set -o pipefail
           echo | openssl s_client -connect {{ item.host }}:{{ item.port }} \
             -servername {{ item.host }} -verify_return_error 2>&1 |
-            grep -E "^Verify return code:" | tail -1
+            grep -E "^ *Verify return code:" | tail -1
         executable: /bin/bash
       register: validate_pki_endpoints
       changed_when: false
@@ -323,14 +329,14 @@
 
     - name: verify redfish api responds
       ansible.builtin.uri:
-        url: "{{ redfish_bmc_url }}/redfish/v1/"
+        url: "{{ redfish_url }}/redfish/v1/"
         method: GET
         status_code: 200
       register: validate_redfish
 
     - name: verify redfish lists systems
       ansible.builtin.uri:
-        url: "{{ redfish_bmc_url }}/redfish/v1/Systems/"
+        url: "{{ redfish_url }}/redfish/v1/Systems/"
         method: GET
         return_content: true
         status_code: 200

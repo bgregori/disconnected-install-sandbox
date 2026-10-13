@@ -288,6 +288,12 @@ kvm_data_volume_size: "{{ ocp_topology_spec.data_volume_size }}"
 kvm_reserved_vcpu: 8
 kvm_reserved_memory_mb: 16384
 redfish_port: 8000
+# Built here rather than in the role, for the same reason as
+# bastion_repo_url: validate.yml applies no roles, so a role default is
+# out of scope there and resolves to undefined. Anything consumed outside
+# the owning role has to live at this level.
+redfish_scheme: "{{ 'https' if sandbox_tls_everywhere | bool else 'http' }}"
+redfish_url: "{{ redfish_scheme }}://{{ kvm_private_ip }}:{{ redfish_port }}"
 
 # Hardening
 rhel_hardening_enable_fips: true

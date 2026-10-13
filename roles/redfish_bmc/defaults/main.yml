@@ -17,3 +17,5 @@ redfish_bmc_tls_cert: "{{ redfish_bmc_tls_dir }}/sushy.crt"
 redfish_bmc_tls_key: "{{ redfish_bmc_tls_dir }}/sushy.key"
 redfish_bmc_scheme: "{{ 'https' if redfish_bmc_tls | bool else 'http' }}"
 redfish_bmc_url: "{{ redfish_bmc_scheme }}://{{ redfish_bmc_listen_ip }}:{{ redfish_bmc_port }}"
+# validate.yml uses the global redfish_url instead -- a role default is not
+# in scope in a playbook that applies no roles.
