@@ -9,10 +9,19 @@
 # sandbox needs the CA private key -- hosts generate their own leaf keys and
 # send a CSR to be signed -- so there is no reason to put it somewhere a
 # compromised sandbox host could read it.
-pki_ca_dir: "{{ sandbox_pki_dir }}"
+# role_path resolves to <repo>/roles/pki whatever playbook or inventory is
+# in play, which is the only anchor that held. playbook_dir moves with the
+# playbook; inventory_dir is undefined for implicit localhost.
+pki_ca_dir: "{{ role_path }}/../../artifacts/pki"
 pki_ca_key_path: "{{ pki_ca_dir }}/sandbox-ca.key"
 pki_ca_csr_path: "{{ pki_ca_dir }}/sandbox-ca.csr"
 pki_ca_cert_path: "{{ pki_ca_dir }}/sandbox-ca.crt"
+
+# Handoff material for the parts this repo provisions but does not
+# configure -- the mirror registry and the OpenShift API and ingress.
+# Kept apart from the CA's own files so it is obvious what is a root of
+# trust and what is a deliverable.
+pki_artifacts_dir: "{{ pki_ca_dir }}/cluster"
 
 # Preserved across rebuilds by default, for the same reason the SSH key is:
 # a stable root means anything you taught to trust this sandbox once stays

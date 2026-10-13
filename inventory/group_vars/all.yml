@@ -296,17 +296,19 @@ rhel_hardening_stig_profile: xccdf_org.ssgproject.content_profile_stig
 # SSH key is -- a stable root means anything taught to trust this sandbox
 # once keeps working after a reprovision.
 #
-# Anchored to inventory_dir, NOT playbook_dir: playbook_dir follows whichever
-# playbook is running, so a root of trust would move depending on how you
-# invoked ansible. ansible.cfg pins the inventory to this repo, so this
-# always resolves to <repo>/artifacts/pki.
+# The CA directory itself is NOT set here -- it is anchored to the pki
+# role's own location so it resolves to <repo>/artifacts/pki however
+# ansible was invoked. playbook_dir follows the playbook, and inventory_dir
+# is undefined for the implicit localhost you get when the inventory yields
+# no hosts. Both were tried; both moved the root of trust around. Override
+# pki_ca_dir directly if you need it somewhere else.
+
 # Master switch for the TLS-everywhere posture. Individual services can
 # still be overridden one at a time (bastion_repo_tls, redfish_bmc_tls),
 # but this turns the lot off in one place if a certificate problem ever
 # makes the environment unreachable.
 sandbox_tls_everywhere: true
 
-sandbox_pki_dir: "{{ inventory_dir }}/../artifacts/pki"
 sandbox_ca_cert_path: /etc/pki/ca-trust/source/anchors/sandbox-ca.crt
 sandbox_preserve_ca: true
 

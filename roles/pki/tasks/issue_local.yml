@@ -1,0 +1,64 @@
+---
+# Issues a leaf entirely on the CONTROLLER, key included.
+#
+# This is the deliberate exception to issue.yml's rule that a private key
+# never leaves the host that owns it. These certificates are for things
+# Ansible does not manage: the mirror registry, which a separate project
+# stands up, and the OpenShift API and ingress, which do not exist until an
+# installer runs. There is no host to generate a key on, so both halves are
+# produced here and handed over as files.
+#
+# CONTRACT:
+#   pki_local_name          basename; produces <name>.key and <name>.crt
+#                           under pki_artifacts_dir
+#   pki_local_common_name   certificate CN
+#   pki_local_sans          list of SANs in openssl form. FQDNs, wildcards
+#                           and IPs -- never a bare single-label name.
+
+- name: assert the local issue contract is satisfied
+  ansible.builtin.assert:
+    that:
+      - pki_local_name | default('') | length > 0
+      - pki_local_common_name | default('') | length > 0
+      - pki_local_sans | default([]) | length > 0
+    fail_msg: >-
+      pki issue_local.yml needs pki_local_name, pki_local_common_name and
+      pki_local_sans. See the contract in roles/pki/tasks/issue_local.yml.
+    quiet: true
+
+- name: generate the private key
+  community.crypto.openssl_privatekey:
+    path: "{{ pki_artifacts_dir }}/{{ pki_local_name }}.key"
+    type: RSA
+    size: "{{ pki_key_size }}"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+- name: generate the signing request
+  community.crypto.openssl_csr:
+    path: "{{ pki_artifacts_dir }}/{{ pki_local_name }}.csr"
+    privatekey_path: "{{ pki_artifacts_dir }}/{{ pki_local_name }}.key"
+    common_name: "{{ pki_local_common_name }}"
+    subject_alt_name: "{{ pki_local_sans }}"
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    extended_key_usage:
+      - serverAuth
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+
+- name: sign the certificate with the root ca
+  community.crypto.x509_certificate:
+    path: "{{ pki_artifacts_dir }}/{{ pki_local_name }}.crt"
+    csr_path: "{{ pki_artifacts_dir }}/{{ pki_local_name }}.csr"
+    provider: ownca
+    ownca_path: "{{ pki_ca_cert_path }}"
+    ownca_privatekey_path: "{{ pki_ca_key_path }}"
+    ownca_not_after: "{{ pki_cert_validity }}"
+    ownca_digest: "{{ pki_digest }}"
+    mode: "0644"
+  delegate_to: localhost
+  become: false

@@ -41,6 +41,26 @@
   roles:
     - role: pki
 
+# Step 2.0.0b: Certificates for the registry and the cluster
+#
+# Issued now rather than when those steps happen, so that whoever stands up
+# the mirror registry or runs the installer finds a certificate from this
+# environment's root already waiting. The alternative is what produced the
+# three unrelated CAs this PKI replaced: reach the step, find nothing, make
+# something self-signed.
+#
+# localhost only -- none of these belong to a host Ansible manages.
+- name: issue certificates for the registry and the cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: issue the cluster certificate artifacts
+      ansible.builtin.include_role:
+        name: pki
+        tasks_from: cluster_artifacts.yml
+
 # Step 2.0: Set up bastion as local yum repo + content relay
 - name: configure bastion as package repo
   hosts: role_bastion

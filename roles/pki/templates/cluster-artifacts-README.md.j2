@@ -1,0 +1,78 @@
+{{ ansible_managed | comment('plain', prefix='<!--', postfix='-->') }}
+
+# Cluster certificate artifacts
+
+Certificates for the parts of this environment that this repo provisions but
+does not configure: the mirror registry, and the OpenShift API and ingress.
+All are signed by the sandbox root CA (`../sandbox-ca.crt`), so a single
+trust bundle covers every TLS endpoint the cluster will encounter.
+
+Generated for **{{ cluster_domain }}**. Regenerated automatically if deleted;
+a re-run leaves existing files alone.
+
+| File | Used by |
+|---|---|
+| `registry.crt` / `registry.key` | mirror-registry `--sslCert` / `--sslKey` |
+| `api.crt` / `api.key` | `APIServer` named certificate |
+| `ingress.crt` / `ingress.key` | `IngressController` default certificate |
+| `install-config-additionalTrustBundle.yaml` | install-config fragment |
+
+Keys are `0600`. The whole `artifacts/` tree is gitignored.
+
+## Mirror registry
+
+```bash
+./mirror-registry install \
+  --quayHostname registry.{{ cluster_domain }} \
+  --sslCert registry.crt \
+  --sslKey registry.key
+```
+
+## install-config.yaml
+
+Paste the contents of `install-config-additionalTrustBundle.yaml`. This is
+what lets the installer and every node verify the mirror registry — without
+it a disconnected install fails during bootstrap with image pull errors that
+never mention certificates.
+
+It belongs alongside `imageContentSources`, which this file does not cover
+because the mirror set depends on what you actually mirrored.
+
+## API server certificate
+
+Applied after the cluster is up, not during install:
+
+```bash
+oc create secret tls api-cert \
+  --cert=api.crt --key=api.key -n openshift-config
+
+oc patch apiserver cluster --type=merge -p '{
+  "spec": {"servingCerts": {"namedCertificates": [{
+    "names": ["api.{{ cluster_domain }}"],
+    "servingCertificate": {"name": "api-cert"}
+  }]}}}'
+```
+
+Note the SAN list includes `api-int.{{ cluster_domain }}`, the in-cluster
+name the control plane uses to reach itself. Replacing the API certificate
+without it breaks internal clients.
+
+## Ingress certificate
+
+```bash
+oc create secret tls ingress-cert \
+  --cert=ingress.crt --key=ingress.key -n openshift-ingress
+
+oc patch ingresscontroller.operator default -n openshift-ingress-operator \
+  --type=merge -p '{"spec":{"defaultCertificate":{"name":"ingress-cert"}}}'
+```
+
+## Validity
+
+{{ pki_cert_validity }} from issue. Apple rejects TLS server certificates
+valid for more than 398 days, so these are deliberately under that — a
+longer-lived certificate works from Linux and fails in Safari and Chrome.
+
+To rotate, delete the `.crt` and re-run. Changing `pki_cert_validity` alone
+does **not** reissue: `community.crypto` ignores timestamp drift by design,
+or relative validity would churn on every run.
