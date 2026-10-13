@@ -107,6 +107,19 @@
       failed_when: false
       when: r53_zone is not failed
 
+    # Added with the issuer publishing in bastion_haproxy/infra_route53.
+    # Unconditional rather than gated on enable_keycloak_idp: teardown has
+    # to clean up after a run that had it enabled even when the flag is off
+    # now, and state: absent on a record that was never created is a no-op.
+    - name: remove route53 keycloak record
+      amazon.aws.route53:
+        zone: "{{ sandbox_domain }}"
+        record: "keycloak.{{ cluster_name }}.{{ sandbox_domain }}"
+        type: A
+        state: absent
+      failed_when: false
+      when: r53_zone is not failed
+
     # Step 6: Delete VPC and all networking resources
     - name: teardown vpc and all networking
       when: sandbox_vpcs.vpcs | length > 0
