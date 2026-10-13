@@ -1,3 +1,8 @@
+---
+title: "Agent-Based Installer: ISO Generation and VM Boot"
+description: Generate the agent ISO, transfer it to the KVM host, and boot the VMs over Redfish virtual media.
+---
+
 # Agent-Based Installer: ISO Generation and VM Boot
 
 This guide covers the post-provisioning steps to generate an OpenShift agent-based

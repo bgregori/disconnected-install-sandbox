@@ -1,0 +1,49 @@
+---
+title: Disconnected OpenShift 4 — AWS Sandbox
+tagline: >-
+  Ansible that turns an empty AWS account into a genuinely air-gapped target for a
+  disconnected OpenShift 4 install.
+description: >-
+  Ansible playbooks that provision an isolated, air-gapped AWS environment simulating a
+  disconnected OpenShift 4 installation target — bastion, internal DNS and NTP, mirror
+  registry host, and KVM nodes behind a Redfish BMC.
+
+# Project pages are served from https://<user>.github.io/<repo>/, so baseurl must match the
+# repository name. Clear both of these if the site ever moves to a custom domain.
+url: https://bgregori.github.io
+baseurl: /disconnected-install-sandbox
+
+repo_url: https://github.com/bgregori/disconnected-install-sandbox
+
+markdown: kramdown
+highlighter: rouge
+
+kramdown:
+  input: GFM
+  hard_wrap: false
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    css_class: highlight
+
+# Enabled by default on GitHub Pages; declared so local `jekyll serve` matches.
+plugins:
+  - jekyll-relative-links
+
+relative_links:
+  enabled: true
+  collections: false
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
+# Top navigation. `file` is matched against page.name to mark the current page.
+nav:
+  - title: Overview
+    file: index.md
+    url: /
+  - title: Agent-based installer
+    file: agent-based-install.md
+    url: /agent-based-install.html
