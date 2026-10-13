@@ -30,6 +30,24 @@
     state: present
     wait: true
 
+# Split horizon, deliberately. Inside the VPC bind_dns points this name at
+# the services host directly; out here it points at the bastion, where
+# HAProxy passes the TLS through untouched. Exactly how api and *.apps
+# already work, and for the same reason -- the issuer is on a private
+# subnet an operator's workstation cannot route to.
+- name: create keycloak route53 a record
+  amazon.aws.route53:
+    zone: "{{ infra_route53_zone }}"
+    record: "keycloak.{{ infra_route53_cluster_name }}.{{ infra_route53_zone }}"
+    type: A
+    ttl: "{{ infra_route53_ttl }}"
+    value:
+      - "{{ infra_route53_bastion_eip }}"
+    overwrite: true
+    state: present
+    wait: true
+  when: infra_route53_keycloak | bool
+
 - name: validate api dns resolution
   ansible.builtin.command:
     cmd: >-

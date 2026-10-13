@@ -1,0 +1,27 @@
+---
+# A serving certificate for the BMC, signed by the environment root CA.
+#
+# sushy-emulator reads these as root at startup, so root-only on the key is
+# right. The SANs cover the IP the agent-based installer is pointed at and
+# the DNS name, because the installer's BMC address may be written either way.
+- name: issue the redfish serving certificate
+  ansible.builtin.include_role:
+    name: pki
+    tasks_from: issue.yml
+  vars:
+    pki_issue_name: sushy
+    pki_issue_common_name: "kvm.{{ cluster_domain }}"
+    pki_issue_dir: "{{ redfish_bmc_tls_dir }}"
+    pki_issue_owner: root
+    pki_issue_group: root
+    pki_issue_sans:
+      - "IP:{{ redfish_bmc_listen_ip }}"
+      - "DNS:kvm.{{ cluster_domain }}"
+
+# notify cannot hang off include_role, and sushy reads the certificate once
+# at startup -- so the restart is triggered from the issue result instead.
+- name: restart sushy when the certificate changed
+  ansible.builtin.set_fact:
+    redfish_bmc_cert_changed: "{{ pki_issue_installed is changed }}"
+  changed_when: pki_issue_installed is changed
+  notify: restart sushy-emulator

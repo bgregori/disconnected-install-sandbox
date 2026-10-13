@@ -2,4 +2,18 @@
 redfish_bmc_port: "{{ redfish_port }}"
 redfish_bmc_listen_ip: "{{ kvm_private_ip }}"
 redfish_bmc_libvirt_uri: "qemu:///system"
+redfish_bmc_config_path: /etc/sushy/sushy-emulator.conf
 redfish_bmc_pip_wheel_url: "{{ bastion_repo_url }}/pip-wheels"
+
+# TLS for the BMC, issued by the environment CA. sushy-emulator terminates
+# it directly via SUSHY_EMULATOR_SSL_CERT/KEY -- nothing proxies it.
+#
+# This endpoint drives power and virtual media for every OCP node, so it is
+# worth more than its plaintext past suggested: anyone who can reach it can
+# boot a node off media of their choosing.
+redfish_bmc_tls: "{{ sandbox_tls_everywhere }}"
+redfish_bmc_tls_dir: /etc/pki/sushy
+redfish_bmc_tls_cert: "{{ redfish_bmc_tls_dir }}/sushy.crt"
+redfish_bmc_tls_key: "{{ redfish_bmc_tls_dir }}/sushy.key"
+redfish_bmc_scheme: "{{ 'https' if redfish_bmc_tls | bool else 'http' }}"
+redfish_bmc_url: "{{ redfish_bmc_scheme }}://{{ redfish_bmc_listen_ip }}:{{ redfish_bmc_port }}"

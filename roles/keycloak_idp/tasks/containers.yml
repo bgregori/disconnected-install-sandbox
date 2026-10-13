@@ -148,6 +148,40 @@
 - name: apply pending restarts before verifying
   ansible.builtin.meta: flush_handlers
 
+# Handlers alone are not sufficient, learned the hard way on this role and
+# on redfish_bmc. If a run stages a new certificate, notifies a restart and
+# then fails before handlers flush, the next run finds the file already
+# correct, notifies nothing, and the container keeps serving the OLD
+# certificate indefinitely while the file on disk says otherwise.
+#
+# Comparing the container start time against the staged certificate mtime
+# converges no matter how the previous run ended.
+- name: check whether the running container predates its certificate
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      started=$(date -d "$(systemctl --user show {{ keycloak_idp_service }} \
+        -p ActiveEnterTimestamp --value)" +%s 2>/dev/null || echo 0)
+      cert=$(stat -c %Y {{ keycloak_idp_container_cert_dir }}/tls.crt 2>/dev/null || echo 0)
+      test "${started:-0}" -ge "$cert"
+    executable: /bin/bash
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
+  environment: "{{ keycloak_idp_user_env }}"
+  register: keycloak_idp_cert_fresh
+  changed_when: false
+  failed_when: false
+
+- name: restart keycloak when its certificate is newer than the container
+  ansible.builtin.systemd:
+    name: "{{ keycloak_idp_service }}"
+    scope: user
+    state: restarted
+  become: true
+  become_user: "{{ keycloak_idp_user }}"
+  environment: "{{ keycloak_idp_user_env }}"
+  when: keycloak_idp_cert_fresh.rc != 0
+
 - name: open the firewall for the issuer port
   ansible.posix.firewalld:
     port: "{{ item }}"

@@ -7,6 +7,11 @@
 #   pki_issue_common_name  certificate CN
 #   pki_issue_sans         list of SANs in openssl form, e.g.
 #                          ["DNS:host.example.com", "IP:10.0.2.10"]
+#                          Use FQDNs and IPs only. A bare single-label name
+#                          like "DNS:services" makes macOS reject the WHOLE
+#                          certificate with "unsupported or invalid name
+#                          syntax" -- openssl accepts it, so this only shows
+#                          up when someone opens the endpoint in a browser.
 #   pki_issue_dir          directory on the TARGET host for the cert and key
 # optional:
 #   pki_issue_owner/group  default root:root

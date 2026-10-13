@@ -78,7 +78,7 @@ keycloak_idp_image_dir: "{{ keycloak_idp_state_dir }}/images"
 # the serving cert and key are staged into the user's cert dir below.
 keycloak_idp_pki_dir: /etc/pki/keycloak
 keycloak_idp_ca_cert_path: "{{ keycloak_ca_cert_path }}"
-keycloak_idp_ca_key_path: "{{ keycloak_idp_pki_dir }}/keycloak-ca.key"
+# Written by pki issue.yml as <pki_issue_name>.crt/.key in this directory.
 keycloak_idp_tls_cert_path: "{{ keycloak_idp_pki_dir }}/keycloak.crt"
 keycloak_idp_tls_key_path: "{{ keycloak_idp_pki_dir }}/keycloak.key"
 # Rootless Quadlet reads from the user's config dir, not /etc/containers.
@@ -89,17 +89,9 @@ keycloak_idp_quadlet_dir: "{{ keycloak_idp_home }}/.config/containers/systemd"
 keycloak_idp_fetch_ca: true
 keycloak_idp_fetch_ca_dest: "{{ playbook_dir }}/../artifacts/keycloak-ca.crt"
 
-# TLS. RSA + SHA-256 are FIPS 140-3 approved; 3072 bits clears the 2048-bit
-# floor RHBK's strict FIPS mode imposes with room to spare.
-keycloak_idp_key_size: 3072
-keycloak_idp_ca_common_name: "Disconnected Sandbox Keycloak Issuer CA"
-keycloak_idp_ca_validity: "+3650d"
-keycloak_idp_cert_validity: "+825d"
-keycloak_idp_tls_san:
-  - "DNS:{{ keycloak_idp_hostname }}"
-  - "DNS:services.{{ cluster_domain }}"
-  - "DNS:services"
-  - "IP:{{ keycloak_idp_bind_ip }}"
+# TLS material comes from the environment CA now; key size, digest and
+# validity are the pki role's defaults, so this role no longer sets them.
+# The SAN list moved into tasks/tls.yml with the issue request.
 
 # The address the issuer listens on. Not 0.0.0.0 -- the management port is
 # published separately on loopback and must not follow this one out.

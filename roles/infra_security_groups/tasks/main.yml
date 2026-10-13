@@ -34,6 +34,14 @@
         ports: "{{ infra_security_groups_bastion_repo_port }}"
         cidr_ip: "{{ infra_security_groups_private_subnet_cidr }}"
         rule_desc: "Local yum repo for air-gapped hosts"
+      # Keycloak admin console and discovery document, passed through by
+      # HAProxy to the services host. admin_cidr rather than 0.0.0.0/0
+      # unlike the OCP ports above: the cluster endpoints have to be open
+      # to whatever federates to them, but the IdP console does not.
+      - proto: tcp
+        ports: "{{ infra_security_groups_keycloak_port }}"
+        cidr_ip: "{{ infra_security_groups_admin_cidr }}"
+        rule_desc: "Keycloak issuer and admin console from operator workstation"
     rules_egress:
       - proto: tcp
         ports: 22

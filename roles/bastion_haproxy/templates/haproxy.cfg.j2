@@ -46,6 +46,23 @@ frontend apps-http
 backend ocp-apps-http
     server ingress-vip {{ bastion_haproxy_ingress_vip }}:80 check
 
+{% if bastion_haproxy_keycloak | bool %}
+# Keycloak OIDC issuer — TCP passthrough to the services host.
+#
+# Same pattern as the OCP api and apps above, and for the same reason: the
+# issuer lives on a private subnet an operator's workstation cannot route
+# to, while bastion.<domain> is public. Passthrough rather than termination
+# so the client still gets Keycloak's own certificate -- the issuer URL is
+# baked into every token it signs, so the name the browser verifies has to
+# be the real one, not the bastion's.
+frontend keycloak
+    bind *:{{ bastion_haproxy_keycloak_port }}
+    default_backend keycloak-issuer
+
+backend keycloak-issuer
+    server keycloak {{ bastion_haproxy_keycloak_ip }}:{{ bastion_haproxy_keycloak_port }} check
+
+{% endif %}
 # Stats (local only)
 listen stats
     bind 127.0.0.1:{{ bastion_haproxy_stats_port }}

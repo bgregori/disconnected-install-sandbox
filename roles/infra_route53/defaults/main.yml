@@ -4,3 +4,9 @@ infra_route53_zone: "{{ sandbox_domain }}"
 infra_route53_cluster_name: "{{ cluster_name }}"
 infra_route53_bastion_eip: "{{ infra_ec2_bastion_eip }}"
 infra_route53_ttl: 300
+
+# Publish the Keycloak issuer name at the bastion so it resolves from
+# outside the VPC. Paired with the HAProxy passthrough in bastion_haproxy;
+# turning one on without the other gives a name that resolves to a closed
+# port, so both follow enable_keycloak_idp.
+infra_route53_keycloak: "{{ enable_keycloak_idp }}"

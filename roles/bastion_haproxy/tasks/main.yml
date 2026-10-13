@@ -33,8 +33,5 @@
     permanent: true
     immediate: true
     state: enabled
-  loop:
-    - "6443"
-    - "443"
-    - "80"
+  loop: "{{ bastion_haproxy_firewall_ports }}"
   failed_when: false

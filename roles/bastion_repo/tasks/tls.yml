@@ -39,7 +39,6 @@
     pki_issue_sans:
       - "IP:{{ bastion_private_ip }}"
       - "DNS:bastion.{{ cluster_domain }}"
-      - "DNS:bastion"
 
 # httpd reads the key as root at startup, so root-only is correct and no
 # group access is needed.

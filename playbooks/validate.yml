@@ -143,6 +143,82 @@
                       ~ (validate_data_mount | regex_escape) ~ '\s')
              | first | default('') | trim }}
 
+# The point of a single root is that one anchor verifies everything. These
+# checks are deliberately done the hard way -- against the compiled system
+# bundle with no -CAfile and no validate_certs: false -- because a trust
+# problem is otherwise invisible until something downstream fails oddly.
+- name: validate the environment root is trusted everywhere
+  hosts: role_bastion:role_services:role_registry:role_kvm
+  gather_facts: false
+
+  tasks:
+    - name: check the root ca is in the compiled trust bundle
+      ansible.builtin.command:
+        cmd: openssl verify -CAfile /etc/pki/tls/certs/ca-bundle.crt {{ sandbox_ca_cert_path }}
+      register: validate_pki_anchor
+      changed_when: false
+      failed_when: false
+
+    - name: assert the root ca is trusted here
+      ansible.builtin.assert:
+        that:
+          - validate_pki_anchor.rc == 0
+        fail_msg: >-
+          The sandbox root CA is not trusted on {{ inventory_hostname }}.
+          Every TLS endpoint in the environment chains to it, so anything
+          that verifies properly will fail here while anything using
+          -k or validate_certs: false will quietly appear to work.
+        success_msg: "sandbox root CA trusted on {{ inventory_hostname }}"
+
+# From the BASTION only. The security groups deliberately restrict which
+# hosts may reach which service -- only the bastion and the OCP nodes have
+# egress to the Redfish BMC, for instance -- so checking every endpoint
+# from every host tests paths the design forbids and fails for reasons that
+# have nothing to do with the certificates. The bastion is the one vantage
+# point with egress to all three.
+- name: validate every tls endpoint chains to the sandbox root
+  hosts: role_bastion
+  gather_facts: false
+
+  tasks:
+    # s_client rather than curl: it reports the verify result for the chain
+    # the server actually presented, so a server using a self-signed or
+    # stale certificate is caught even if the request itself would succeed.
+    - name: verify each tls endpoint presents a chain to the sandbox root
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          echo | openssl s_client -connect {{ item.host }}:{{ item.port }} \
+            -servername {{ item.host }} -verify_return_error 2>&1 |
+            grep -E "^Verify return code:" | tail -1
+        executable: /bin/bash
+      register: validate_pki_endpoints
+      changed_when: false
+      failed_when: false
+      loop: "{{ validate_tls_endpoints }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        validate_tls_endpoints: >-
+          {{ [{'name': 'bastion repo', 'host': bastion_private_ip, 'port': bastion_repo_port}]
+             + ([{'name': 'keycloak issuer', 'host': keycloak_hostname, 'port': keycloak_port}]
+                if enable_keycloak_idp | bool else [])
+             + ([{'name': 'redfish bmc', 'host': kvm_private_ip, 'port': redfish_port}]
+                if enable_kvm_host | bool else []) }}
+
+    - name: assert every endpoint verified
+      ansible.builtin.assert:
+        that:
+          - "'Verify return code: 0 (ok)' in item.stdout"
+        fail_msg: >-
+          {{ item.item.name }} at {{ item.item.host }}:{{ item.item.port }} did not
+          present a chain this host trusts -- openssl said:
+          {{ item.stdout | default('(no output)') | trim }}
+        success_msg: "{{ item.item.name }} chains to the sandbox root"
+      loop: "{{ validate_pki_endpoints.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
 - name: validate dns service
   hosts: role_services:role_registry:role_kvm
   gather_facts: false
@@ -247,14 +323,14 @@
 
     - name: verify redfish api responds
       ansible.builtin.uri:
-        url: "http://{{ kvm_private_ip }}:{{ redfish_port }}/redfish/v1/"
+        url: "{{ redfish_bmc_url }}/redfish/v1/"
         method: GET
         status_code: 200
       register: validate_redfish
 
     - name: verify redfish lists systems
       ansible.builtin.uri:
-        url: "http://{{ kvm_private_ip }}:{{ redfish_port }}/redfish/v1/Systems/"
+        url: "{{ redfish_bmc_url }}/redfish/v1/Systems/"
         method: GET
         return_content: true
         status_code: 200
@@ -302,8 +378,13 @@
           discovery document says {{ validate_keycloak_discovery.json.issuer | default('nothing') }}
         success_msg: "OIDC issuer {{ keycloak_issuer_url }} answers and self-reports correctly"
 
+# role_kvm only. The comment below says this proves the path the OCP nodes
+# will take, and the KVM host is on that path because it also carries
+# sg-ocp-nodes. The registry is not, and has no security group rule letting
+# it reach the issuer -- including it here tested a path that is deliberately
+# closed and failed on a correctly built environment.
 - name: validate keycloak reachability from the cluster subnet
-  hosts: role_registry:role_kvm
+  hosts: role_kvm
   gather_facts: false
 
   tasks:

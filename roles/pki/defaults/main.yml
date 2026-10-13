@@ -28,7 +28,18 @@ pki_ca_validity: "+3650d"
 # strict FIPS mode imposes, with room to spare.
 pki_key_size: 3072
 pki_digest: sha256
-pki_cert_validity: "+825d"
+# 397 days, not the 825 this inherited from keycloak_idp. Apple caps TLS
+# server certificates at 398 days for anything issued after 2020-09-01 and
+# rejects longer ones outright -- Safari, Chrome and curl on macOS all fail
+# with "unsupported or invalid name syntax", which names the wrong problem
+# entirely. openssl accepts 825 happily, so this is invisible from the
+# Linux hosts and only appears when an operator opens the endpoint.
+#
+# Changing this does NOT reissue existing certificates: ignore_timestamps
+# defaults to true in community.crypto (correctly, or relative validity
+# would churn every run), so the leaf has to be deleted to pick up a new
+# value.
+pki_cert_validity: "+397d"
 
 # Where the root lands in each host's trust store. update-ca-trust compiles
 # anchors into the bundles that openssl, curl, python and podman all read.

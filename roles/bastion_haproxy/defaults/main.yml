@@ -2,3 +2,21 @@
 bastion_haproxy_api_vip: "{{ api_vip }}"
 bastion_haproxy_ingress_vip: "{{ ingress_vip }}"
 bastion_haproxy_stats_port: 9000
+
+# Publish the Keycloak issuer through the bastion, so the admin console and
+# the discovery document are reachable from an operator workstation without
+# an SSH tunnel. Follows api/apps: public DNS points the name at the bastion
+# and HAProxy passes the TLS straight through untouched, so the client still
+# verifies Keycloak's own certificate rather than one belonging to the proxy.
+bastion_haproxy_keycloak: "{{ enable_keycloak_idp }}"
+bastion_haproxy_keycloak_ip: "{{ services_private_ip }}"
+bastion_haproxy_keycloak_port: "{{ keycloak_port }}"
+
+# Ports HAProxy fronts, opened in firewalld. Derived rather than hardcoded
+# so adding a frontend cannot leave the port listening but unreachable --
+# which is exactly what adding the keycloak frontend did: the security group
+# allowed it, haproxy bound it, and firewalld silently dropped it, so every
+# layer looked correct in isolation while the connection was refused.
+bastion_haproxy_firewall_ports: >-
+  {{ ['6443', '443', '80']
+     + ([bastion_haproxy_keycloak_port | string] if bastion_haproxy_keycloak | bool else []) }}

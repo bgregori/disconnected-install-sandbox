@@ -225,7 +225,7 @@ registry_port: 8443
 # the escape hatch, and it is the only thing between a broken certificate
 # and a phase 2 that cannot install packages.
 bastion_repo_port: 8080
-bastion_repo_tls: true
+bastion_repo_tls: "{{ sandbox_tls_everywhere }}"
 bastion_repo_scheme: "{{ 'https' if bastion_repo_tls | bool else 'http' }}"
 bastion_repo_url: "{{ bastion_repo_scheme }}://{{ bastion_private_ip }}:{{ bastion_repo_port }}"
 # Subdirectory of the bastion document root holding saved container image
@@ -300,6 +300,12 @@ rhel_hardening_stig_profile: xccdf_org.ssgproject.content_profile_stig
 # playbook is running, so a root of trust would move depending on how you
 # invoked ansible. ansible.cfg pins the inventory to this repo, so this
 # always resolves to <repo>/artifacts/pki.
+# Master switch for the TLS-everywhere posture. Individual services can
+# still be overridden one at a time (bastion_repo_tls, redfish_bmc_tls),
+# but this turns the lot off in one place if a certificate problem ever
+# makes the environment unreachable.
+sandbox_tls_everywhere: true
+
 sandbox_pki_dir: "{{ inventory_dir }}/../artifacts/pki"
 sandbox_ca_cert_path: /etc/pki/ca-trust/source/anchors/sandbox-ca.crt
 sandbox_preserve_ca: true
