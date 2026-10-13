@@ -14,3 +14,6 @@ infra_ec2_kvm_ip: "{{ kvm_private_ip }}"
 infra_ec2_kvm_root_volume_size: "{{ kvm_root_volume_size }}"
 infra_ec2_kvm_data_volume_size: "{{ kvm_data_volume_size }}"
 infra_ec2_kvm_secondary_ips: "{{ (ocp_node_ips + [api_vip, ingress_vip]) | unique }}"
+
+# How long to wait for an instance to reach its target state.
+infra_ec2_wait_timeout: "{{ instance_wait_timeout }}"

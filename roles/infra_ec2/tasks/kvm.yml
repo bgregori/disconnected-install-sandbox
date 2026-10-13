@@ -29,6 +29,10 @@
       Environment: sandbox
       sandbox_role: kvm
     wait: true
+    # Bare metal POST is minutes, not seconds. This has fitted inside the
+    # 600s default so far, but it is the same instance type whose slowness
+    # broke teardown, so it does not rely on that holding.
+    wait_timeout: "{{ infra_ec2_wait_timeout }}"
     state: running
   register: infra_ec2_kvm_result
 

@@ -43,6 +43,10 @@
         region: "{{ aws_region }}"
         state: absent
         wait: true
+        # Not the 600s default: this call covers the m5.metal, which takes
+        # longer than that to terminate. Giving up early is what left an
+        # attached ENI holding the VPC and made teardown a two-pass job.
+        wait_timeout: "{{ instance_wait_timeout }}"
       when: sandbox_instances.instances | length > 0
 
     # Step 3: Release Elastic IPs

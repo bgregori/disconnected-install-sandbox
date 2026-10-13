@@ -273,6 +273,14 @@ keycloak_image_archives:
 enable_kvm_host: true
 kvm_private_ip: "10.0.2.30"
 kvm_instance_type: m5.metal
+# Bare metal is slow to start and much slower to terminate.
+# amazon.aws.ec2_instance's wait defaults to 600s, which is not enough:
+# teardown measured this m5.metal taking over 15 minutes to reach
+# terminated, so the module stopped waiting, teardown moved on to the VPC,
+# and the subnet delete failed on an ENI still attached to the dying
+# instance. The symptom was a teardown that always needed running twice.
+# rhel_hardening_reboot_timeout is 1200 for the same underlying reason.
+instance_wait_timeout: 1800
 kvm_root_volume_size: 200
 # Sized for the selected topology - override with -e kvm_data_volume_size=<gb>
 kvm_data_volume_size: "{{ ocp_topology_spec.data_volume_size }}"
