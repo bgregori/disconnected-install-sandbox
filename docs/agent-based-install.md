@@ -12,7 +12,8 @@ from it using Redfish virtual media.
 ## Prerequisites
 
 - Phase 1 and Phase 2 playbooks have completed successfully
-- Mirror registry on the registry host is populated (`oc mirror` has run)
+- Mirror registry on the registry host is populated (`oc mirror` has run), served with the
+  `registry.crt`/`.key` pair Phase 2 left in `artifacts/pki/cluster/`
 - DNS records for `api.ocp.<domain>`, `api-int.ocp.<domain>`, and
   `*.apps.ocp.<domain>` resolve correctly
 - The KVM host VMs are defined but not running (`virsh list --all` shows them as `shut off`)
@@ -47,9 +48,6 @@ networking:
     - 172.30.0.0/16
 compute:
   - name: worker
-    replicas: 0
-compute:
-  - name: worker
     replicas: 0        # 3 when ocp_topology=standard
 controlPlane:
   name: master
@@ -69,9 +67,26 @@ imageDigestSources:
   - source: quay.io/openshift-release-dev/ocp-v4.0-art-dev
     mirrors:
       - registry.ocp.<domain>:8443/openshift/release
+additionalTrustBundle: |
+  # Paste the sandbox root CA here — see below.
 ```
 
 > **Note:** Use `imageDigestSources`, not the deprecated `imageContentSources`.
+
+> **`additionalTrustBundle` is not optional here.** The mirror registry is served with a
+> certificate from the sandbox root CA, and the installer and every node verify the registry
+> against this bundle before they can pull a single image. Omit it and the cluster fails during
+> bootstrap with image pull errors that never mention certificates.
+>
+> Phase 2 wrote the fragment for you, correctly indented, on the machine you ran Ansible from:
+>
+> ```bash
+> cat artifacts/pki/cluster/install-config-additionalTrustBundle.yaml
+> ```
+>
+> Paste its contents in place of the `additionalTrustBundle` stub above. The same directory holds
+> `registry.crt`/`.key` for `mirror-registry`, and `api`/`ingress` pairs to apply after the cluster
+> is up — its `README.md` has those commands.
 
 ### agent-config.yaml
 

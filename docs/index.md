@@ -45,11 +45,14 @@ hero_tagline: >-
 | **Split-horizon DNS** | Route53 serves `api.ocp.*` and `*.apps.ocp.*` to the bastion EIP; BIND9 serves the same names internally, pointed at the keepalived VIPs. |
 | **Bare metal simulation** | An m5.metal host runs the OCP nodes as KVM VMs on a bridged, proxy-ARP network, fronted by a sushy-emulator Redfish BMC — so the **Agent-Based Installer** works just as it does on real hardware. |
 | **Hardened by default** | FIPS 140-3 and DISA STIG remediation applied to every host, so you hit the same `fapolicyd`, SELinux, and sudo friction a customer would. |
+| **One root of trust** | A sandbox root CA — created on your workstation, never on a sandbox host — signs every TLS endpoint and is installed in each host's trust store. Certificates for the mirror registry, `api`, and `*.apps` are pre-issued into `artifacts/pki/cluster/`, alongside a paste-ready `additionalTrustBundle` fragment for `install-config.yaml`. |
 | **One knob for shape** | `ocp_topology` picks `sno`, `compact`, or `standard`; node counts, IPs, VIPs, DNS records, VM sizing, and disk sizes all derive from it. |
 
 **Not in scope:** the registry host is provisioned as infrastructure only. Populating it
 with `mirror-registry` and `oc mirror v2` is a separate project, and OpenShift itself is
-installed by you, following [the agent-based install guide](agent-based-install.md).
+installed by you, following [the agent-based install guide](agent-based-install.md). Both
+steps find a certificate from the sandbox CA already waiting for them, so nothing has to
+be self-signed on the way.
 
 ---
 
@@ -77,7 +80,7 @@ Three more references live in the repository rather than on this site, because t
 track the code closely:
 
 - **[README](https://github.com/bgregori/disconnected-install-sandbox/blob/main/README.md)** — the fullest command reference: every topology, every override, split-horizon DNS tables, dynamic inventory notes.
-- **[ARCHITECTURE.md](https://github.com/bgregori/disconnected-install-sandbox/blob/main/ARCHITECTURE.md)** — the blueprint: AWS resource mapping, the security group matrix, execution workflow, and variable hierarchy. Go here when you need to know *why* a rule or address exists.
+- **[ARCHITECTURE.md](https://github.com/bgregori/disconnected-install-sandbox/blob/main/ARCHITECTURE.md)** — the blueprint: AWS resource mapping, the security group matrix, execution workflow, variable hierarchy, and the environment PKI. Go here when you need to know *why* a rule or address exists.
 - **[CLAUDE.md](https://github.com/bgregori/disconnected-install-sandbox/blob/main/CLAUDE.md)** — conventions for contributing: Ansible style, role structure, lint configuration, and the storage and security rules that are non-negotiable.
 
 Each role's `defaults/main.yml` is also written to be read — it documents every variable
@@ -197,6 +200,12 @@ Private hosts are reached through the bastion automatically via `ProxyCommand`.
 Populate the mirror registry, then follow
 [the agent-based install guide](agent-based-install.md): write `install-config.yaml` and
 `agent-config.yaml`, generate the ISO, and boot the VMs through the Redfish BMC.
+
+Phase 2 left the certificate material you need in `artifacts/pki/cluster/` —
+`registry.crt`/`.key` for `mirror-registry --sslCert/--sslKey`, `api` and `ingress` pairs
+for the cluster's named certificates, and
+`install-config-additionalTrustBundle.yaml` to paste straight into `install-config.yaml`.
+The `README.md` in that directory has the commands.
 
 ### 9. Tear it down
 

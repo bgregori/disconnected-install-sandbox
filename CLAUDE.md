@@ -10,7 +10,7 @@ gateway, no internet gateway routes, no VPC endpoints.
 ## Architecture Reference
 
 See `ARCHITECTURE.md` for the full blueprint: AWS resource mapping, security group matrix,
-execution workflow, and variable hierarchy.
+execution workflow, variable hierarchy, and the environment PKI (§8).
 
 ## Prerequisites
 
@@ -135,6 +135,10 @@ yamllint .
 - All SG rules must be explicit — no `0.0.0.0/0` ingress rules except bastion SSH from admin_cidr.
 - Private subnet egress rules must NEVER include `0.0.0.0/0` as destination.
 - Validate air-gap: assert private route table has no default route after provisioning.
+- Never create a second CA or a self-signed certificate. The sandbox has one root of trust —
+  issue leaves through `roles/pki` (`tasks_from: issue.yml`), and add every new TLS endpoint to the
+  endpoint list in `playbooks/validate.yml` so it is checked to chain to that root. The CA private
+  key stays on the controller under `artifacts/pki/`; hosts only ever see leaf keys and the anchor.
 
 ### Storage Rules
 
@@ -210,6 +214,8 @@ roles/infra_security_groups Phase 1 — Security groups for bastion, services, r
 roles/infra_ec2             Phase 1 — EC2 instances, SSH key pair generation and import
 roles/infra_route53         Phase 1 — Route53 DNS records
 roles/infra_ssh_config      Phase 1 — Local SSH client configuration (~/.ssh/config.d)
+roles/pki                   Phase 2 — Sandbox root CA, host trust, and leaf certificate issuance
+roles/data_volume           Phase 2 — Format and mount an EBS data volume by UUID
 roles/bastion_repo          Phase 2 — Local yum repo on bastion for air-gapped hosts
 roles/rhel_hardening        Phase 2 — FIPS 140-3 enablement + DISA STIG application
 roles/bastion_haproxy       Phase 2 — HAProxy reverse proxy for OCP API + apps ingress
@@ -222,6 +228,7 @@ roles/redfish_bmc           Phase 2 — sushy-emulator Redfish BMC (optional)
 roles/ocp_node_prep         Phase 2 — OCP node prerequisites and validation
 inventory/                  Dynamic inventory (aws_ec2 plugin) + group_vars
 files/rpms/                 Staging directory for offline RPM bundles (gitignored)
+artifacts/pki/              Sandbox root CA + pre-issued cluster certificates (gitignored)
 scripts/                    Helper scripts (RPM download, pull-secret handling)
 docs/                       Agent-based installer guide and operational procedures
 ```

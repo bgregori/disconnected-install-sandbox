@@ -57,7 +57,16 @@ Without those credentials Phase 2 fails fast with an explanatory message. See
 `roles/keycloak_idp/defaults/main.yml` for what the role does and does not do about FIPS,
 and for Red Hat's support posture on running RHBK under podman.
 
-The **registry host** is provisioned as infrastructure only — registry software setup using Red Hat's `mirror-registry` binary and `oc mirror v2` is handled by a separate project.
+**One root of trust:** the first thing Phase 2 does is create a sandbox root CA and install it in
+every host's trust store, before anything else needs TLS — including the bastion package repo, which
+a host cannot install from over a connection it does not yet trust. Every TLS endpoint in the
+environment chains to that root: the bastion repo, the Keycloak issuer, and the Redfish BMC. The CA
+private key is generated on the **controller** (your workstation) and never leaves it — hosts
+generate their own leaf keys and send only a CSR to be signed, so no sandbox host can read the root.
+`validate.yml` checks that each endpoint presents a chain the hosts trust. See
+[Certificates and the sandbox CA](#certificates-and-the-sandbox-ca) for the artifacts handed to you.
+
+The **registry host** is provisioned as infrastructure only — registry software setup using Red Hat's `mirror-registry` binary and `oc mirror v2` is handled by a separate project. Its certificate, however, is already issued and waiting.
 
 ## Prerequisites
 
@@ -263,17 +272,18 @@ Runs on `localhost` via boto3 API calls. Creates:
 
 Runs on remote hosts via SSH through the bastion ProxyCommand tunnel:
 
-1. **Bastion local repo** — httpd on :8080 serving RPMs for air-gapped hosts
-2. **RHUI disable + bastion repo config** — disable cloud repos on private hosts, point to bastion
-3. **FIPS 140-3** — enabled on all hosts with reboot
-4. **BIND9 DNS** — authoritative zone for `ocp.{sandbox_domain}`
-5. **Chrony NTP** — local stratum 10 server (no upstream — air-gapped)
-6. **DNS/NTP clients** — all private hosts pointed at services host
-7. **HAProxy** — L4 TCP passthrough on bastion for OCP API (:6443) and apps (:443/:80), routes to keepalived VIPs
-8. **KVM host** (when enabled) — libvirt/KVM with 3 OCP node VMs using bridge networking with proxy ARP
-9. **Redfish BMC** (when enabled) — sushy-emulator for Redfish API access to VMs
-10. **DISA STIG** — OpenSCAP remediation on private hosts first, then bastion
-11. **Keycloak OIDC issuer** — RHBK + PostgreSQL in podman on the services host, after the
+1. **Environment PKI** — create the sandbox root CA on the controller, trust it on every host, and issue the registry and cluster certificates into `artifacts/pki/cluster/`. First, because the bastion repo below is itself a TLS endpoint.
+2. **Bastion local repo** — httpd on :8080 serving RPMs for air-gapped hosts, over TLS using a certificate from the sandbox CA (`bastion_repo_tls=false` falls back to plain HTTP)
+3. **RHUI disable + bastion repo config** — disable cloud repos on private hosts, point to bastion
+4. **FIPS 140-3** — enabled on all hosts with reboot
+5. **BIND9 DNS** — authoritative zone for `ocp.{sandbox_domain}`
+6. **Chrony NTP** — local stratum 10 server (no upstream — air-gapped)
+7. **DNS/NTP clients** — all private hosts pointed at services host
+8. **HAProxy** — L4 TCP passthrough on bastion for OCP API (:6443) and apps (:443/:80), routes to keepalived VIPs
+9. **KVM host** (when enabled) — libvirt/KVM with 3 OCP node VMs using bridge networking with proxy ARP
+10. **Redfish BMC** (when enabled) — sushy-emulator for Redfish API access to VMs
+11. **DISA STIG** — OpenSCAP remediation on private hosts first, then bastion
+12. **Keycloak OIDC issuer** — RHBK + PostgreSQL in podman on the services host, after the
     private-host STIG pass and before the bastion's
 
 STIG runs on private hosts before bastion so the bastion's httpd repo remains available while private hosts install `openscap-scanner` and `scap-security-guide` from it. The STIG remediation and sudo NOPASSWD restoration run in a single shell command to prevent lockout.
@@ -325,6 +335,39 @@ Two DNS views serve the same names with different targets:
 
 Both external and internal traffic routes through the VIPs. External clients (browser, `oc` CLI) hit Route53 -> bastion EIP -> HAProxy -> VIPs. Internal clients (OCP nodes, pods) resolve via BIND9 -> VIPs directly. OpenShift's keepalived manages the VIPs across control plane nodes for HA failover. The KVM host bridge uses proxy ARP and /32 routes so AWS routes traffic to the VIPs correctly.
 
+## Certificates and the Sandbox CA
+
+`roles/pki` creates one certificate authority for the whole environment, replacing what used to be
+two unrelated private CAs and two plaintext services. It runs first in Phase 2, because every TLS
+endpoint after it chains to this root.
+
+**Where things live:**
+
+| Path | What it is |
+|---|---|
+| `artifacts/pki/sandbox-ca.crt` / `.key` | The root CA. On the **controller only** — no sandbox host ever holds the key. |
+| `/etc/pki/ca-trust/source/anchors/sandbox-ca.crt` | The anchor on each host, compiled in by `update-ca-trust`. |
+| `artifacts/pki/cluster/` | Pre-issued certificates for the registry and the cluster, plus a `README.md` with the commands. |
+
+**Pre-issued handoff artifacts** — issued up front so that whoever stands up the mirror registry or
+runs the installer finds a certificate from this environment's root already waiting, rather than
+reaching that step, finding nothing, and generating a self-signed one:
+
+| File | Used by |
+|---|---|
+| `registry.crt` / `.key` | `mirror-registry --sslCert/--sslKey` (SANs: `registry.ocp.*`, registry private IP) |
+| `api.crt` / `.key` | `APIServer` named certificate (SANs: `api.ocp.*`, `api-int.ocp.*`, API VIP) |
+| `ingress.crt` / `.key` | `IngressController` default certificate (SANs: `*.apps.ocp.*`, ingress VIP) |
+| `install-config-additionalTrustBundle.yaml` | Paste straight into `install-config.yaml` — this is what lets the installer and every node verify the mirror registry |
+
+**Details that matter:**
+
+- **RSA 3072 / SHA-256**, both FIPS 140-3 approved. RSA rather than EC sidesteps any question about which curves the host crypto policy still offers after `fips-mode-setup`, and 3072 bits clears RHBK's 2048-bit strict-FIPS floor.
+- **Leaf validity is 397 days.** Apple rejects TLS server certificates valid longer than 398 days, and the error names the wrong problem entirely. `openssl` accepts longer happily, so it only surfaces when an operator opens the endpoint in a browser on macOS.
+- **The CA survives a teardown**, like the SSH key — anything you taught to trust this sandbox once keeps working after a reprovision. Teardown does not touch `artifacts/`, and the role only writes the key when it is missing; delete `artifacts/pki/` by hand to mint a fresh root. (`sandbox_preserve_ca` states that intent but is currently read by nothing.)
+- **Rotating a leaf:** delete the `.crt` and re-run. Changing `pki_cert_validity` alone does not reissue — `community.crypto` ignores timestamp drift by design.
+- **Adding a TLS endpoint:** include the role with `tasks_from: issue.yml` (the contract is documented at the top of that file; the private key is generated on the target host and only the CSR travels to the controller), and add the endpoint to the list in `playbooks/validate.yml`.
+
 ## Project Structure
 
 ```
@@ -334,6 +377,8 @@ roles/infra_security_groups  Phase 1 — Security groups with strict isolation r
 roles/infra_ec2        Phase 1 — EC2 instances, SSH key pair (locally generated)
 roles/infra_route53    Phase 1 — Route53 DNS records
 roles/infra_ssh_config Phase 1 — Local SSH config with ProxyCommand
+roles/pki              Phase 2 — Sandbox root CA, host trust, leaf certificate issuance
+roles/data_volume      Phase 2 — Format and mount an EBS data volume by UUID
 roles/bastion_repo     Phase 2 — Local yum repo on bastion
 roles/bind_dns         Phase 2 — BIND9 DNS server
 roles/chrony_ntp       Phase 2 — Chrony NTP server
@@ -345,6 +390,7 @@ roles/redfish_bmc      Phase 2 — sushy-emulator Redfish BMC (optional)
 roles/rhel_hardening   Phase 2 — FIPS 140-3 + DISA STIG
 roles/ocp_node_prep    Validation — OCP node prerequisites (DNS, NTP, FIPS checks)
 inventory/             Dynamic inventory (aws_ec2 plugin) + group_vars
+artifacts/pki/         Sandbox root CA + pre-issued cluster certificates (gitignored)
 docs/                  Operational guides (agent-based-install)
 scripts/               Helper scripts (RPM download)
 ```

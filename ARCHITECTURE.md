@@ -45,12 +45,11 @@ disconnected-openshift-aws-sandbox/
 │
 ├── inventory/
 │   ├── group_vars/
-│   │   ├── all.yml                         # Global: networking, IPs, instance types, hardening, SSH
-│   │   ├── bastion.yml                     # Direct SSH — no ProxyCommand
-│   │   ├── services.yml                    # NTP allow subnet
-│   │   ├── registry.yml                    # Infrastructure-only marker (mirror-registry is separate)
+│   │   ├── all.yml                         # Global: networking, IPs, instance types, hardening, SSH, PKI
+│   │   ├── role_bastion.yml                # Direct SSH — no ProxyCommand
+│   │   ├── role_services.yml               # Commentary only — chrony_ntp_allow_subnet derives from all.yml
+│   │   ├── role_registry.yml               # Infrastructure-only marker (mirror-registry is separate)
 │   │   └── private_hosts.yml               # ProxyCommand SSH args for bastion tunnel
-│   ├── host_vars/                          # Per-host overrides (rarely needed)
 │   └── aws_ec2.yml                         # amazon.aws.aws_ec2 dynamic inventory plugin config
 │
 ├── playbooks/
@@ -58,6 +57,7 @@ disconnected-openshift-aws-sandbox/
 │   ├── phase1_provision.yml                # AWS infrastructure (runs on localhost)
 │   ├── phase2_configure.yml                # RHEL 9 services (runs via bastion proxy)
 │   ├── teardown.yml                        # Idempotent destroy of all tagged resources
+│   ├── teardown_eni_cleanup.yml            # Included by teardown — ENIs, VPC endpoints, NAT gateways
 │   └── validate.yml                        # End-to-end smoke tests
 │
 ├── roles/
@@ -91,8 +91,26 @@ disconnected-openshift-aws-sandbox/
 │   │   ├── defaults/main.yml
 │   │   └── meta/main.yml
 │   │
+│   ├── pki/                                # Sandbox root CA + leaf certificate issuance
+│   │   ├── tasks/main.yml                  # Ensure the CA exists, then trust it on this host
+│   │   ├── tasks/ca.yml                    # Create the root CA — controller only, run_once
+│   │   ├── tasks/trust.yml                 # Install the anchor + update-ca-trust + verify
+│   │   ├── tasks/issue.yml                 # Issue a leaf: key on the host, CSR signed on the controller
+│   │   ├── tasks/issue_local.yml           # Issue a leaf entirely on the controller (handoff artifacts)
+│   │   ├── tasks/cluster_artifacts.yml     # registry/api/ingress certs + additionalTrustBundle fragment
+│   │   ├── templates/cluster-artifacts-README.md.j2
+│   │   ├── defaults/main.yml
+│   │   └── meta/main.yml
+│   │
+│   ├── data_volume/                        # Format + mount an EBS data volume, pinned by UUID
+│   │   ├── tasks/main.yml                  # Shared by the registry (/data) and the KVM host
+│   │   ├── defaults/main.yml
+│   │   └── meta/main.yml
+│   │
 │   ├── bastion_repo/                       # Local yum repo on bastion for air-gapped hosts
 │   │   ├── tasks/main.yml
+│   │   ├── tasks/tls.yml                   # Repo serving certificate (IP SAN — used before DNS exists)
+│   │   ├── tasks/container_images.yml      # Pull + podman save RHBK images for the air-gapped host
 │   │   ├── templates/repo-httpd.conf.j2
 │   │   ├── defaults/main.yml
 │   │   ├── handlers/main.yml
@@ -101,7 +119,8 @@ disconnected-openshift-aws-sandbox/
 │   ├── rhel_hardening/                     # FIPS 140-3 enablement + DISA STIG application
 │   │   ├── tasks/main.yml
 │   │   ├── tasks/fips.yml                  # fips-mode-setup + reboot + verify
-│   │   ├── tasks/stig.yml                  # OpenSCAP STIG remediation + sudo restore
+│   │   ├── tasks/stig.yml                  # OpenSCAP STIG remediation + sudo restore + firewall reopen
+│   │   ├── tasks/oci_runtime.yml           # fapolicyd allowances for the OCI runtime, post-STIG
 │   │   ├── defaults/main.yml
 │   │   ├── handlers/main.yml
 │   │   └── meta/main.yml
@@ -139,10 +158,10 @@ disconnected-openshift-aws-sandbox/
 │   │
 │   ├── keycloak_idp/                       # Red Hat build of Keycloak as an OIDC issuer
 │   │   ├── tasks/main.yml
-│   │   ├── tasks/prepare.yml               # podman, directories, fapolicyd OCI runtime rules
+│   │   ├── tasks/prepare.yml               # podman, directories, container user
 │   │   ├── tasks/images.yml                # fetch + podman load the relayed image archives
 │   │   ├── tasks/secrets.yml               # generate-if-absent passwords and client secret
-│   │   ├── tasks/tls.yml                   # issuer CA + serving certificate
+│   │   ├── tasks/tls.yml                   # serving certificate from the environment CA
 │   │   ├── tasks/realm.yml                 # render the realm import JSON
 │   │   ├── tasks/containers.yml            # Quadlet units, start, firewall
 │   │   ├── tasks/verify.yml                # readiness, discovery document, summary
@@ -163,6 +182,7 @@ disconnected-openshift-aws-sandbox/
 │   │
 │   ├── redfish_bmc/                        # sushy-emulator Redfish BMC (optional)
 │   │   ├── tasks/main.yml
+│   │   ├── tasks/tls.yml                   # BMC serving certificate from the environment CA
 │   │   ├── templates/sushy-emulator.conf.j2
 │   │   ├── templates/sushy-emulator.service.j2
 │   │   ├── defaults/main.yml
@@ -171,14 +191,24 @@ disconnected-openshift-aws-sandbox/
 │   │
 │   └── ocp_node_prep/                      # OCP node prerequisites (validation role)
 │       ├── tasks/main.yml                  # Validate DNS, NTP, FIPS
-│       ├── defaults/main.yml
+│       ├── defaults/main.yml               # NOT wired into any playbook — see note below
 │       └── meta/main.yml
+│
+├── artifacts/                              # Generated, gitignored, controller-side
+│   └── pki/
+│       ├── sandbox-ca.{key,csr,crt}        # The environment root CA — key never leaves here
+│       └── cluster/                        # Pre-issued handoff certs + README (see §8)
 │
 ├── files/
 │   └── rpms/                               # Staging dir for offline RPM bundles (gitignored)
 │
 ├── scripts/
 │   └── download_rpms.sh                    # Pre-fetch RPMs on internet-connected machine
+│
+├── docs/                                   # GitHub Pages site (Jekyll)
+│   ├── index.md                            # Landing page — what gets built, getting started
+│   ├── agent-based-install.md              # ISO generation, Redfish boot, install troubleshooting
+│   ├── _config.yml, _layouts/, assets/
 │
 ├── .ansible-lint                           # ansible-lint configuration
 ├── .yamllint                               # yamllint configuration
@@ -202,11 +232,34 @@ Each infrastructure role maps to a distinct AWS resource lifecycle. `infra_vpc` 
 before `infra_security_groups` (SGs reference VPC ID), which must complete before `infra_ec2`
 (instances reference SG IDs). Separation makes teardown ordering trivial and enables selective reprovisioning.
 
-**Why OCP nodes are NOT provisioned here:**
-The OpenShift IPI installer creates its own EC2 instances at install time. This repo provisions
-only the infrastructure the installer needs — VPC, subnets, security groups (`sg-ocp-nodes`),
-DNS records, and HAProxy backends. The `ocp_node_ips` in `all.yml` are pre-defined so BIND9
-zones and HAProxy config are ready before the installer runs.
+**Why OCP nodes are not EC2 instances:**
+With `enable_kvm_host: true` (the default) the nodes are KVM VMs on the m5.metal host, which is
+what makes the Agent-Based Installer — the standard disconnected bare-metal method — work at all.
+With it false, no nodes exist and the IPI installer would create its own EC2 instances at install
+time. Either way this repo provisions the surrounding infrastructure: VPC, subnets, `sg-ocp-nodes`,
+DNS records, HAProxy backends. `ocp_nodes` in `all.yml` is pre-defined so BIND9 zones, HAProxy
+config, and the ENI secondary IPs are ready before the installer runs.
+
+**Why `ocp_node_prep` is not in any playbook:**
+It validates DNS, NTP and FIPS *from a node*, and the nodes only exist once OpenShift is installed.
+No phase applies it. Run it by hand against the cluster nodes if you want that check; it is kept
+because the checks are the right ones, not because anything calls it.
+
+**Why one CA, and why it lives on the controller:**
+Every TLS endpoint in the sandbox chains to a single root created by `roles/pki`. Before it there
+were two unrelated private CAs and two plaintext services, and each consumer needed its own trust
+step. The CA private key is generated on the operator's workstation under `artifacts/pki/` and
+never copied to a sandbox host: hosts generate their own leaf keys and send only a CSR to be
+signed. The role is deliberately dependency-free (a file copy plus `update-ca-trust`) because it
+has to run before the bastion package repo — itself a TLS endpoint — is usable. See §8.
+
+**Why one `data_volume` role for two very different hosts:**
+The registry's `/data` and the KVM host's `/var/lib/libvirt/images` are both EBS volumes on hosts
+that reboot for FIPS and again for STIG. AWS assigns NVMe names in attach order, so a device path
+written to `fstab` can point at the root disk after a reboot — observed on 2026-10-12. The role
+detects the device at run time, resolves its UUID with `blkid -c /dev/null` after `mkfs`, and mounts
+by UUID only. `nofail` keeps a missing volume from wedging the boot, which also means it fails
+silently, so `validate.yml` checks both mounts are real and UUID-pinned.
 
 **Why `common_client` role:**
 Every private host (services, registry) needs identical DNS resolver and NTP client
@@ -243,6 +296,7 @@ persist within the same play.
 | Elastic IP            | `disconnected-sandbox-bastion-eip`| Associated with bastion ENI                      |
 | Route53 A Record      | `api.ocp.{{ sandbox_domain }}`    | → Bastion EIP (HAProxy → OCP nodes :6443)        |
 | Route53 A Record      | `*.apps.ocp.{{ sandbox_domain }}` | → Bastion EIP (HAProxy → OCP nodes :443)          |
+| Route53 A Record      | `keycloak.ocp.{{ sandbox_domain }}` | → Bastion EIP (HAProxy → services :8443). Only when `enable_keycloak_idp` |
 
 **Route53 note:** Records are created in an existing hosted zone for `{{ sandbox_domain }}`
 — no new zone is created. Route53 records are created in Phase 1 (alongside EC2 provisioning)
@@ -255,8 +309,11 @@ on the bastion L4-forwards to the keepalived VIPs on the private subnet.
 |--------------------|---------|---------------|----------------|--------------------------|----------|----------------|
 | bastion            | Public  | t3.xlarge     | 10.0.1.10      | sg-bastion               | 500 GiB  | —              |
 | services           | Private | t3.medium, t3.large w/ IdP | 10.0.2.10      | sg-services              | 50 GiB   | —              |
-| registry           | Private | t3.large      | 10.0.2.20      | sg-registry              | 50 GiB   | 500 GiB (images)|
-| kvm (optional)     | Private | m5.metal      | 10.0.2.30      | sg-kvm-host + sg-ocp-nodes | 200 GiB  | per topology (VM images) |
+| registry           | Private | t3.large      | 10.0.2.20      | sg-registry              | 200 GiB  | 500 GiB → `/data` |
+| kvm (optional)     | Private | m5.metal      | 10.0.2.30      | sg-kvm-host + sg-ocp-nodes | 200 GiB  | per topology → `/var/lib/libvirt/images` |
+
+Both data volumes are formatted and mounted in Phase 2 by the shared `data_volume` role, by UUID
+and never by device path — see §1 Key Design Decisions and §4.3.
 
 **KVM host** (when `enable_kvm_host: true`, default): An m5.metal bare metal instance running
 libvirt/KVM with the OCP node VMs for the selected `ocp_topology` using a Linux bridge (`virbr1`)
@@ -278,12 +335,18 @@ stays individually overridable (`ocp_worker_count`, `ocp_master_vcpu`, …). DNS
 backends, and VM definitions adapt automatically.
 
 **Registry host note:** The registry host is provisioned as infrastructure only (EC2 instance, security group,
-DNS record, 500 GiB data volume). Registry software configuration is handled by a separate project
-using Red Hat's `mirror-registry` binary and `oc mirror v2`.
+DNS record, 500 GiB data volume mounted at `/data`, and a `quay-app` systemd user override that re-fixes
+`/data/quay` permissions against the STIG umask). Registry software configuration is handled by a separate
+project using Red Hat's `mirror-registry` binary and `oc mirror v2` — its serving certificate is pre-issued
+by `roles/pki` and waiting in `artifacts/pki/cluster/` (§8).
 
 **AMI:** RHEL 9 latest (`ami-xxxxxxxxx` — resolved at runtime via `amazon.aws.ec2_ami_info` filter on `owner: 309956199498`, `name: RHEL-9*`).
 
-**Key Pair:** `disconnected-sandbox-key` — generated locally by `community.crypto.openssh_keypair` in `infra_ec2` role, public key imported to AWS via `ec2_key` `key_material`. Private key at `~/.ssh/disconnected-sandbox.pem`.
+**Key Pair:** `disconnected-sandbox-key` — generated locally by `community.crypto.openssh_keypair` in `infra_ec2` role, public key imported to AWS via `ec2_key` `key_material`. Private key at `~/.ssh/disconnected-sandbox.pem`. Teardown keeps it by default (`sandbox_preserve_ssh_key`), so the fingerprint is stable across rebuilds and cached copies — the ssh-agent entry above all — stay valid.
+
+**Host keys:** sandbox host keys go to `~/.ssh/known_hosts.disconnected-sandbox`, not the operator's real
+`known_hosts`. The static private IPs are recycled on every rebuild, and enabling FIPS changes each host's
+key algorithm (ed25519 is not FIPS 140-3 approved), so churn here is expected and is kept contained.
 
 All instances tagged: `Project: disconnected-sandbox`, `Environment: sandbox`, `sandbox_role: <role>`.
 
@@ -324,7 +387,8 @@ All security groups are **stateful** — return traffic for allowed inbound rule
 | Ingress   | TCP      | 443        | `0.0.0.0/0`              | HAProxy → OCP apps ingress        |
 | Ingress   | TCP      | 6443       | `0.0.0.0/0`              | HAProxy → OCP Kubernetes API      |
 | Ingress   | TCP      | 80         | `0.0.0.0/0`              | HAProxy → OCP HTTP redirect       |
-| Ingress   | TCP      | 8080       | `10.0.2.0/24`            | Local yum repo for air-gapped hosts |
+| Ingress   | TCP      | 8080       | `10.0.2.0/24`            | Local yum repo (HTTPS — see §8)   |
+| Ingress   | TCP      | 8443       | `{admin_cidr}`           | Keycloak issuer + admin console, passed through by HAProxy. Not `0.0.0.0/0` — unlike the cluster ports, nothing has to federate to it from anywhere |
 | Egress    | TCP      | 22         | `10.0.2.0/24`            | SSH to all private subnet hosts   |
 | Egress    | TCP      | 443        | `0.0.0.0/0`              | HTTPS — download content/packages |
 | Egress    | TCP      | 80         | `0.0.0.0/0`              | HTTP — download content/packages  |
@@ -333,6 +397,7 @@ All security groups are **stateful** — return traffic for allowed inbound rule
 | Egress    | UDP      | 53         | `10.0.2.10/32`           | DNS queries to services host      |
 | Egress    | TCP      | 8443       | `10.0.2.20/32`           | Registry HTTPS — oc mirror push   |
 | Egress    | TCP      | 8000       | `10.0.2.30/32`           | Redfish BMC on KVM host (when enabled) |
+| Egress    | TCP      | 8443       | `10.0.2.10/32`           | HAProxy backend → Keycloak issuer |
 
 ### 3.2 sg-services (DNS + NTP + Keycloak OIDC Host)
 
@@ -358,19 +423,22 @@ All security groups are **stateful** — return traffic for allowed inbound rule
 | Egress    | UDP      | 53         | `10.0.2.10/32`           | DNS to services host              |
 | Egress    | UDP      | 123        | `10.0.2.10/32`           | NTP to services host              |
 | Egress    | TCP      | 8080       | `10.0.1.10/32`           | Bastion local yum repo            |
+| Egress    | TCP      | 6443       | `{api_vip}/32`           | Kubernetes API — `oc` from the registry host |
+| Egress    | TCP      | 443        | `{ingress_vip}/32`       | HTTPS routes to the cluster       |
 
 ### 3.4 sg-ocp-nodes (OpenShift 4 Cluster — all masters and workers)
 
-This security group is pre-created for the IPI installer. No EC2 instances are assigned to it
-by this repo — the installer assigns it to nodes it creates.
+When `enable_kvm_host` is true this group is attached to the KVM host alongside `sg-kvm-host`, so
+the bridged VM traffic is governed by these rules. When it is false, no instance carries it and the
+group simply waits for the IPI installer to assign it to the nodes it creates.
 
 #### External-facing ingress (from VPC)
 
 | Direction | Protocol | Port(s)       | Source / Destination     | Purpose                           |
 |-----------|----------|---------------|--------------------------|-----------------------------------|
 | Ingress   | TCP      | 22            | `sg-bastion`             | SSH from bastion only             |
-| Ingress   | TCP      | 80            | `10.0.2.0/24`            | HTTP routes (HAProxy router)      |
-| Ingress   | TCP      | 443           | `10.0.2.0/24`            | HTTPS routes (HAProxy router)     |
+| Ingress   | TCP      | 80            | `10.0.0.0/16`            | HTTP routes — from the whole VPC because HAProxy is on the public subnet |
+| Ingress   | TCP      | 443           | `10.0.0.0/16`            | HTTPS routes — same reason        |
 | Ingress   | TCP      | 6443          | `10.0.0.0/16`            | Kubernetes API server             |
 | Ingress   | TCP      | 22623         | `10.0.2.0/24`            | Machine Config Server             |
 
@@ -397,6 +465,7 @@ by this repo — the installer assigns it to nodes it creates.
 | Egress    | TCP      | 53            | `10.0.2.10/32`           | DNS to services host              |
 | Egress    | UDP      | 53            | `10.0.2.10/32`           | DNS to services host              |
 | Egress    | UDP      | 123           | `10.0.2.10/32`           | NTP to services host              |
+| Egress    | TCP      | 8443          | `10.0.2.10/32`           | Keycloak OIDC issuer — the oauth stack fetches the discovery document and JWKS on every token validation |
 | Egress    | TCP      | 5000          | `10.0.2.20/32`           | Registry (HTTP)                   |
 | Egress    | TCP      | 8443          | `10.0.2.20/32`           | Registry (HTTPS)                  |
 | Egress    | TCP      | 8080          | `10.0.1.10/32`           | Bastion local yum repo            |
@@ -464,9 +533,11 @@ Created when `enable_kvm_host: true`. The KVM host also gets `sg-ocp-nodes` assi
 
 ### 4.1 Prerequisites (Operator Workstation)
 
-- Ansible >= 2.15, Python >= 3.9
+- Ansible >= 2.15, Python >= 3.9, `boto3` >= 1.28.0
 - `amazon.aws` collection >= 9.0.0
-- `community.crypto` collection >= 2.0.0 (required for SSH key generation via `openssh_keypair`)
+- `community.crypto` collection >= 2.0.0 — SSH key generation *and* the whole PKI. Every `pki`
+  task is delegated to localhost, so `cryptography` only has to exist on the controller
+- `ansible.posix` >= 1.6.0 (firewalld, authorized_key), `community.general` >= 8.0.0 (nmcli, filesystem)
 - AWS credentials exported as env vars (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
 - Route53 hosted zone for your domain
 - Operator's public IP known (`admin_cidr` variable)
@@ -515,6 +586,8 @@ Step 1.5: infra_route53 role
   ├── Look up existing hosted zone for {{ sandbox_domain }}
   ├── Create A record: api.ocp.{{ sandbox_domain }} → {{ bastion_eip }}
   ├── Create A record: *.apps.ocp.{{ sandbox_domain }} → {{ bastion_eip }}
+  ├── Create A record: keycloak.ocp.{{ sandbox_domain }} → {{ bastion_eip }}
+  │     (only when enable_keycloak_idp — HAProxy passes 8443 through to services)
   └── Uses infra_ec2_bastion_eip set_fact from Step 1.3
 ```
 
@@ -525,30 +598,24 @@ Host bastion-sandbox
     HostName <bastion_eip>
     User ec2-user
     IdentityFile ~/.ssh/disconnected-sandbox.pem
+    UserKnownHostsFile ~/.ssh/known_hosts.disconnected-sandbox
     StrictHostKeyChecking accept-new
 
 Host services-sandbox
     HostName 10.0.2.10
-    User ec2-user
-    IdentityFile ~/.ssh/disconnected-sandbox.pem
+    ... as above, plus:
     ProxyCommand ssh -W %h:%p bastion-sandbox
-    StrictHostKeyChecking accept-new
 
-Host registry-sandbox
-    HostName 10.0.2.20
-    User ec2-user
-    IdentityFile ~/.ssh/disconnected-sandbox.pem
-    ProxyCommand ssh -W %h:%p bastion-sandbox
-    StrictHostKeyChecking accept-new
-
-# When enable_kvm_host is true:
-Host kvm-sandbox
-    HostName 10.0.2.30
-    User ec2-user
-    IdentityFile ~/.ssh/disconnected-sandbox.pem
-    ProxyCommand ssh -W %h:%p bastion-sandbox
-    StrictHostKeyChecking accept-new
+Host registry-sandbox            # 10.0.2.20
+Host kvm-sandbox                 # 10.0.2.30 — only when enable_kvm_host
+Host ocp-master-0-sandbox        # one entry per node in ocp_nodes, at its ip
+Host ocp-master-1-sandbox        #   (so the aliases follow the topology)
+...
 ```
+
+Every entry pins `UserKnownHostsFile` to the sandbox-scoped file, for the reason in §2.2.
+Node entries are generated from `ocp_nodes`, so they exist before the VMs do and change shape
+with `ocp_topology`.
 
 ### 4.3 Phase 2 — Configure RHEL 9 Services
 
@@ -560,31 +627,96 @@ Host kvm-sandbox
 ```
 Hostnames: set short hostnames on all hosts (bastion, services, registry, kvm)
 
+Step 2.0.0: pki role (bastion, services, registry, kvm)
+  ├── (controller, run_once) Create artifacts/pki/sandbox-ca.{key,csr,crt}
+  │     RSA 3072 / SHA-256, CA:TRUE, 10-year root. Idempotent — reused if present.
+  ├── Copy the certificate to /etc/pki/ca-trust/source/anchors/sandbox-ca.crt
+  ├── update-ca-trust extract
+  └── ASSERT: openssl verify against the compiled bundle succeeds
+      ORDERING NOTE: FIRST, and load-bearing. Every TLS endpoint below chains
+            to this root, including the bastion package repo — and a host
+            cannot install packages over a connection it does not yet trust.
+            The role is dependency-free for exactly this reason: the CA is
+            made on the controller, and trusting it is a copy plus
+            update-ca-trust, both of which work on a base image with no repo.
+
+Step 2.0.0b: pki role, cluster_artifacts.yml (localhost)
+  ├── Issue registry.crt/.key   — SANs registry.ocp.<domain>, registry IP
+  ├── Issue api.crt/.key        — SANs api, api-int, api_vip
+  ├── Issue ingress.crt/.key    — SANs *.apps, ingress_vip
+  ├── Write install-config-additionalTrustBundle.yaml (correctly indented)
+  └── Write artifacts/pki/cluster/README.md with the consuming commands
+      WHY NOW: the registry and the cluster are configured by other work.
+            Issuing up front removes the step where someone reaches that
+            point, finds no certificate, and self-signs one — which is how
+            the sandbox previously ended up with three unrelated roots.
+
 Step 2.0: bastion_repo role (bastion)
   ├── Install httpd, createrepo, yum-utils on bastion (has internet)
   ├── Download all RPMs + dependencies for private hosts:
   │     openscap-scanner, scap-security-guide, libxslt, bind, bind-utils,
-  │     chrony, tmux, tcpdump, nmap-ncat
+  │     chrony, tmux, tcpdump, nmap-ncat, fapolicyd, firewalld, aide,
+  │     rsyslog, audit, policycoreutils-python-utils, nmstate, podman,
+  │     python3-cryptography
+  ├── Mirror the whole rpm/rpm-libs sibling set as a unit — they carry exact-NEVR
+  │     Requires on each other, so pulling one at a newer release is unsolvable
+  │     on an air-gapped host (and breaks STIG's fapolicyd controls)
+  ├── (when KVM) Download qemu-kvm, libvirt, virt-install, python3-libvirt,
+  │     python3-pip, plus sushy-tools pip wheels into /pip-wheels
+  ├── (when Keycloak) Pull RHBK + PostgreSQL images and podman save them into
+  │     /container-images — the bastion is the only host with internet AND
+  │     registry credentials
   ├── Run createrepo to build yum repo metadata
   ├── Restore SELinux contexts on repo directory
   ├── Disable httpd default Listen 80 (conflicts with HAProxy)
+  ├── Issue the repo serving certificate from the environment CA (tasks/tls.yml)
+  │     SANs include the bastion IP: private hosts reach the repo before BIND9
+  │     exists, so they connect by address, not by name
   ├── Configure httpd VirtualHost on port 8080 → /var/www/html/repos/
-  ├── Configure SELinux for custom port
-  └── Start httpd — repo available at http://10.0.1.10:8080/rhel9-local/
+  ├── Configure SELinux for custom port, open firewalld
+  └── Start httpd — repo available at https://10.0.1.10:8080/rhel9-local/
+      One port carries TLS rather than adding a second listener, which would
+      mean widening the bastion security group. Set bastion_repo_tls=false
+      to fall back to plain HTTP if a certificate ever strands the hosts.
 
 Step 2.0.1: Disable RHUI + configure bastion repo (services, registry, kvm)
   ├── dnf config-manager --disable '*rhui*'
-  └── Add yum_repository: bastion-local → http://10.0.1.10:8080/rhel9-local
+  └── Add yum_repository: bastion-local → {{ bastion_repo_url }}/rhel9-local
       NOTE: Private hosts have no internet. RHUI repos fail immediately and
             must be disabled before any dnf operations.
 
+Step 2.0.2: Registry data volume (registry)
+  ├── Create /data owned root:root, before the mount, so the directory exists
+  │     with sane ownership even if the volume never attaches
+  ├── data_volume role → detect device, mkfs.xfs, resolve UUID, mount by UUID
+  │     with defaults,nofail,nodev
+  ├── chown ec2-user /data AFTER the mount, so it lands on the volume's
+  │     filesystem root rather than the directory it now hides
+  └── Write a quay-app systemd user override that re-fixes /data/quay
+        permissions on start — the STIG umask otherwise leaves quay's config
+        and rootCA unreadable
+
 Step 2.1: rhel_hardening role — FIPS pass (bastion, then private hosts)
   ├── fips-mode-setup --enable
-  ├── Reboot (Ansible waits for SSH reconnection)
+  ├── Reboot (Ansible waits for SSH reconnection; timeout 1200s)
   ├── Verify: fips-mode-setup --check → "FIPS mode is enabled"
   └── Verify: /proc/sys/crypto/fips_enabled == 1
       NOTE: FIPS is applied BEFORE service configuration so all
             crypto operations (TLS certs, SSH, DNS) use FIPS-approved algorithms.
+
+      HOST KEY NOTE: FIPS stops sshd offering ed25519, so every host comes
+            back from its reboot presenting a DIFFERENT key algorithm. To ssh
+            that is a CHANGED key, which it will not ride out even with
+            StrictHostKeyChecking=no — it logs in but refuses to forward, and
+            the ProxyCommand is `ssh -W`, i.e. forwarding. So the playbook
+            deletes sandbox_known_hosts after the bastion reboot and again
+            after the private hosts reboot.
+
+      TUNNEL NOTE: the private-host play resets connections and waits for the
+            tunnel to rebuild first. ControlPersist=60s sockets from earlier
+            plays still point through a bastion that has since rebooted, and
+            reusing one fails in a way that reads as the private host being
+            down when it is the jump host that moved.
 
 Step 2.2: bind_dns role (services host)
   ├── Install bind, bind-utils via dnf (from bastion-local repo)
@@ -620,6 +752,19 @@ Step 2.4: common_client role (services, registry, kvm)
   ├── Configure chrony client to NTP server 10.0.2.10
   └── VALIDATION: dig, chronyc tracking from each host
 
+Step 2.4.1: Bastion DNS client (bastion)
+  ├── NetworkManager dns=none, so it stops rewriting resolv.conf
+  └── resolv.conf: search ocp.<domain>, nameserver 10.0.2.10, then 10.0.0.2
+      The AWS resolver stays as a second entry — unlike the private hosts,
+      the bastion still has to resolve the internet to fetch packages.
+
+Step 2.4.2: Bastion-to-private SSH key (bastion, then private hosts)
+  ├── Generate /home/ec2-user/.ssh/bastion-internal (ecdsa-521, FIPS-safe)
+  ├── Write a bastion ~/.ssh/config with short aliases: services, registry, kvm
+  └── Authorize the public key on every private host
+      This is for the OPERATOR working from the bastion — oc mirror, scp of
+      the agent ISO — and is separate from the controller's ProxyCommand path.
+
 NOTE: The registry host (10.0.2.20) is provisioned as infrastructure only.
       Registry configuration (mirror-registry binary + oc mirror v2) is handled
       by a separate project. The host, DNS record, security group, and 500 GiB
@@ -631,19 +776,31 @@ Step 2.5: bastion_haproxy role (bastion)
   │     ├── frontend api :6443 → backend ocp-api (TCP mode)
   │     ├── frontend apps :443 → backend ocp-apps (TCP mode)
   │     ├── frontend apps-http :80 → backend ocp-apps-http (TCP mode)
+  │     ├── frontend keycloak :8443 → services host (when enable_keycloak_idp)
   │     └── stats socket for monitoring
   ├── Configure SELinux for HAProxy port bindings
+  ├── Open the fronted ports in firewalld — derived from the frontend list, not
+  │     hardcoded, because adding the keycloak frontend once left the port
+  │     bound and allowed by the SG but silently dropped by firewalld
   ├── Enable and start haproxy.service
   └── VALIDATION: curl -k https://api.ocp.{{ sandbox_domain }}:6443/version
       (expect connection refused until OCP is installed)
 
 Step 2.6: kvm_host role (kvm host) — when enable_kvm_host
-  ├── Install qemu-kvm, libvirt, virt-install from bastion-local repo
-  ├── Format /dev/nvme1n1 as XFS, mount at /var/lib/libvirt/images
-  ├── Enable and start libvirtd
-  ├── Destroy default NAT network (bridge replaces it)
-  ├── Create Linux bridge virbr1 with /32 address + per-node routes, enable proxy ARP
   ├── ASSERT: total VM vCPU/RAM fits this host minus kvm_reserved_{vcpu,memory_mb}
+  ├── Install qemu-kvm, libvirt, virt-install from bastion-local repo
+  ├── data_volume role → mount the data volume at /var/lib/libvirt/images BY UUID
+  │     (never by device path — see §1 Key Design Decisions)
+  ├── Mask the modular libvirt daemons, disable libvirtd's auto-exit timeout
+  ├── Enable and start libvirtd; define + autostart the `default` storage pool
+  │     for virtual media
+  ├── Destroy and undefine the default NAT network (bridge replaces it)
+  ├── Disable nm-cloud-setup so DHCP cannot claim the ENI's secondary IPs,
+  │     and pin eth0 to its static address
+  ├── Create Linux bridge virbr1 with a /32 address plus an explicit /32 route
+  │     per node IP and per VIP, enable proxy ARP, ip_forward, rp_filter=0
+  ├── Install a kvm-networking.service that re-applies the sysctls and the
+  │     proxy-ARP neighbour entry at boot (and after the STIG reboot)
   ├── Create qcow2 disk images (per-node disk_gb, plus storage_disk_gb where enabled)
   ├── Define VM domains from XML template (one per entry in ocp_nodes):
   │     ├── ocp-master-{0..M-1}, ocp-worker-{0..W-1}: vCPU/RAM from the topology preset
@@ -651,17 +808,28 @@ Step 2.6: kvm_host role (kvm host) — when enable_kvm_host
   │     ├── Disk: vda virtio qcow2 (boot), vdb virtio qcow2 (storage, for LVM Storage)
   │     ├── CDROM: empty (ISO mounted via Redfish)
   │     └── CPU: host-passthrough
+  ├── Back the domain XML up onto the data volume, and restore from it when
+  │     the definitions are missing but the disks are not — so a rebuilt host
+  │     reattaching an existing data volume gets its VMs back
+  ├── Serve the data volume over HTTP on :8888 (python3 -m http.server) so the
+  │     Redfish InsertMedia call has a URL for the agent ISO
   └── VMs are defined but NOT started (ABI will power them on)
 
 Step 2.7: redfish_bmc role (kvm host) — when enable_kvm_host
   ├── Install python3-pip from bastion-local repo
   ├── Install sushy-tools from pip wheels (offline):
-  │     pip install --no-index --find-links http://10.0.1.10:8080/pip-wheels sushy-tools
-  ├── Deploy /etc/sushy/sushy-emulator.conf (libvirt URI, listen IP/port)
+  │     pip install --no-index --find-links {{ bastion_repo_url }}/pip-wheels sushy-tools
+  ├── Issue the BMC serving certificate from the environment CA (tasks/tls.yml)
+  │     SANs: the KVM private IP and kvm.ocp.<domain>, because the installer's
+  │     BMC address may be written either way. sushy terminates TLS itself.
+  ├── Deploy /etc/sushy/sushy-emulator.conf (libvirt URI, listen IP/port, TLS)
   ├── Deploy systemd unit: sushy-emulator.service
   ├── Enable and start sushy-emulator
-  └── VALIDATION: Redfish API responds at http://10.0.2.30:8000/redfish/v1/Systems/
+  └── VALIDATION: Redfish API responds at https://10.0.2.30:8000/redfish/v1/Systems/
       (lists one VM UUID per entry in ocp_nodes)
+      This endpoint drives power and virtual media for every node, so it is
+      worth protecting: anyone who reaches it can boot a node off media of
+      their choosing. redfish_bmc_tls=false reverts to plain HTTP.
 
       NOTE: When KVM is enabled, bastion_repo (Step 2.0) also downloads KVM
             packages (qemu-kvm, libvirt, etc.) and pip wheels for sushy-tools
@@ -674,7 +842,24 @@ Step 2.8: rhel_hardening role — STIG pass (private hosts FIRST, then bastion)
   ├── Apply STIG remediation + restore sudo NOPASSWD in single shell command:
   │     oscap xccdf eval --remediate ... ; echo 'ec2-user ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/99-ansible-user
   ├── oscap exit code 2 is expected (some controls need manual remediation)
+  ├── Raise the audit backlog limit and tune auditd for heavy workloads — the
+  │     STIG defaults are small enough that a libvirt host starts losing events
+  ├── Install tmux and configure it to survive the STIG shell timeout
+  ├── Re-open each host's ports in firewalld (rhel_hardening_firewall_ports):
+  │     registry 8443; kvm 8000 + 8888; services 53/tcp, 53/udp, 123/udp;
+  │     bastion 8080, 6443, 443. The Keycloak port is deliberately NOT here —
+  │     keycloak_idp opens it itself, so that role also works run on its own
+  ├── Enable the persistent journal, then reboot (timeout 1200s)
+  ├── Write Red Hat's fapolicyd allowances for the OCI runtime (oci_runtime.yml).
+  │     fapolicyd does not understand containers; without these the runtime
+  │     cannot load its own shared libraries and every container start dies.
+  │     It lives with the hardening, not in keycloak_idp, because any container
+  │     workload on a STIG'd host needs it
   └── Report: /var/log/openscap/stig-remediation.html
+
+Step 2.9: Restore KVM networking after the STIG reboot (kvm host)
+  └── systemctl restart kvm-networking — re-applies the bridge sysctls and the
+      proxy-ARP entry that the reboot cleared
 
       ORDERING NOTE: Private hosts STIG before bastion. STIG's httpd
       remediation can break the bastion repo — running private hosts first
@@ -687,14 +872,15 @@ Step 2.8: rhel_hardening role — STIG pass (private hosts FIRST, then bastion)
 
 Step 2.8.1: keycloak_idp role (services host)
   ├── Install podman from bastion-local repo; assert >= 4.4 (Quadlet)
-  ├── Write /etc/fapolicyd/rules.d/25-oci-runtime.rules + fagenrules --load
-  │     fapolicyd does not support containers; without this the OCI runtime
-  │     cannot load its own shared libraries and every container start dies.
-  ├── Fetch rhbk-keycloak.tar + rhbk-postgres.tar from the bastion repo over
-  │     HTTP and podman load them
+  ├── Fetch rhbk-keycloak.tar + rhbk-postgres.tar from the bastion repo and
+  │     podman load them
   ├── Generate passwords and the OIDC client secret if absent, 0600 root
-  ├── Generate a private CA + serving certificate for keycloak.ocp.<domain>
-  │     (RSA 3072 / SHA-256; the CA cert is what the cluster consumes)
+  ├── Issue a serving certificate for keycloak.ocp.<domain> from the
+  │     ENVIRONMENT CA (this role used to run a private CA of its own, which
+  │     left the sandbox with two unrelated roots and made the cluster trust a
+  │     CA that signed exactly one certificate). A copy of the root is
+  │     published at keycloak_ca_cert_path so that path stays meaningful —
+  │     it is now the environment root, not an issuer-specific CA
   ├── Render the openshift realm: admin + user1..user5, group cluster-admins
   │     with user1, CONFIGURE_TOTP as a default required action, pbkdf2-sha512
   │     password policy, and a confidential OIDC client with claim mappers for
@@ -704,14 +890,14 @@ Step 2.8.1: keycloak_idp role (services host)
   │     pg_isready, start Keycloak with `start --import-realm`
   ├── Open 8443/tcp in firewalld
   └── VALIDATION: GET /health/ready on loopback :9000, then the OIDC discovery
-      document over HTTPS validated against the generated CA
+      document over HTTPS validated against the environment root CA
 
       ORDERING NOTE: after the private-host STIG pass, before the bastion's.
       After, so the IdP is stood up on the hardened host it has to live on
       (fapolicyd, SELinux enforcing, firewalld closed) rather than being
       configured first and broken by the STIG reboot. Before the bastion's,
-      because the container images arrive over HTTP from the bastion repo and
-      STIG's httpd remediation can take that repo down.
+      because the container images arrive from the bastion repo and STIG's
+      httpd remediation can take that repo down.
 
       IMPORT NOTE: `--import-realm` is create-once — RHBK skips a realm that
       already exists and there is no override for the startup path. Editing
@@ -730,6 +916,7 @@ Step 2.8.1: keycloak_idp role (services host)
 ansible.cfg:
   [ssh_connection]
   ssh_args = -o ControlMaster=auto -o ControlPersist=60s
+             -o UserKnownHostsFile=~/.ssh/known_hosts.disconnected-sandbox
   pipelining = true
 
   [defaults]
@@ -738,6 +925,8 @@ ansible.cfg:
 group_vars/private_hosts.yml:
   ansible_ssh_common_args: >-
     -o ProxyCommand="ssh -W %h:%p -i {{ ssh_key_path }}
+    -o UserKnownHostsFile={{ sandbox_known_hosts }}
+    -o StrictHostKeyChecking=no
     ec2-user@{{ hostvars[groups['role_bastion'][0]].ansible_host }}"
 
 group_vars/all.yml:
@@ -745,8 +934,20 @@ group_vars/all.yml:
   ansible_ssh_private_key_file: {{ ssh_key_path }}
 ```
 
-The bastion group overrides `ansible_ssh_common_args` to empty (direct connection).
-The `private_hosts` group is auto-populated by the dynamic inventory for all non-bastion hosts.
+The bastion group (`role_bastion.yml`) overrides `ansible_ssh_common_args` to empty (direct
+connection). The `private_hosts` group is auto-populated by the dynamic inventory for all
+non-bastion hosts.
+
+The known-hosts options are repeated inside the `ProxyCommand` on purpose. That spawns a *second*
+ssh process which inherits nothing from `[ssh_connection]`, so without them the inner hop falls
+back to the operator's real `~/.ssh/known_hosts` — and `host_key_checking = false` on the outer
+connection does nothing for it. The inner hop cannot prompt either, so a key it does not like
+surfaces as `Connection closed by UNKNOWN port 65535`: a host-key failure wearing the costume of a
+network one. `accept-new` is not sufficient because the FIPS reboot *changes* the bastion's key
+algorithm rather than introducing a new host; see the host key note in §4.3 Step 2.1.
+
+`ansible.cfg` repeats the known_hosts path literally because an ini file cannot template.
+`sandbox_known_hosts` in `all.yml` is the same path — change both together.
 
 ### 4.5 Dynamic Inventory Configuration
 
@@ -785,22 +986,55 @@ Key details:
 
 Reverse-order destruction, all filtered by `tag:Project=disconnected-sandbox`:
 
-1. Terminate all EC2 instances (wait for termination)
-2. Release Elastic IP
+1. Terminate all EC2 instances, waiting `instance_wait_timeout` (1800 s, not the module's
+   600 s default — see below)
+2. Disassociate and release Elastic IPs
 3. Delete key pair
-4. Remove Route53 A records (api.ocp.*, *.apps.ocp.*)
-5. Delete security groups (must be after instance termination)
-6. Find all ENIs in VPC, force-detach any in-use ENIs, wait 15 s, delete all ENIs
+4. Remove Route53 A records (`api.ocp.*`, `*.apps.ocp.*`, `keycloak.ocp.*`)
+5. `teardown_eni_cleanup.yml`: terminate any instance still in the VPC that the tag filter
+   missed, delete VPC endpoints and NAT gateways, wait for attached ENIs to clear, force-detach
+   what is left, then delete the ENIs
+6. Revoke all ingress then all egress rules on non-default SGs — they cross-reference each
+   other, so neither side can be deleted while the rule between them exists — then delete the SGs
 7. Delete subnets
 8. Detach and delete Internet Gateway
 9. Delete route tables (non-main)
-10. Delete VPC
-11. Remove local SSH key (`.pem` + `.pub`) and config files
+10. Report anything still standing, then delete the VPC
+11. Local cleanup: drop the key from `ssh-agent`, remove the SSH config stanza and the sandbox
+    `known_hosts`. The key pair itself is **kept** unless `sandbox_preserve_ssh_key=false`
 
-All resources are discovered by tag, making teardown idempotent and safe
-against partial provisioning failures. ENI cleanup (step 6) handles
-lingering interfaces from recently terminated instances that would otherwise
-cause `DependencyViolation` errors on subnet/VPC deletion.
+All resources are discovered by tag, making teardown idempotent and safe against partial
+provisioning failures. Step 5 handles lingering interfaces from recently terminated instances
+that would otherwise cause `DependencyViolation` errors on subnet/VPC deletion.
+
+**Why the wait timeout is 1800 s:** bare metal is slow to start and much slower to stop. An
+m5.metal was measured taking over 15 minutes to reach `terminated`, so the module gave up, teardown
+moved on to the VPC, and the subnet delete failed on an ENI still attached to the dying instance.
+The symptom was a teardown that always needed running twice.
+
+**What teardown does not remove:** `artifacts/pki/`. The root CA and the issued cluster
+certificates survive a teardown by design, for the same reason the SSH key does — anything taught
+to trust this sandbox once keeps working after a reprovision. Delete the directory by hand for a
+fresh root.
+
+### 4.7 Validation
+
+`playbooks/validate.yml` is the gate before installing OpenShift. It applies no roles — every
+value it needs is read from `all.yml`, which is why things like `bastion_repo_url` and
+`redfish_url` are defined there rather than in the owning role. It checks:
+
+| Check | What it asserts |
+|---|---|
+| FIPS | `fips-mode-setup --check` on every host |
+| Air gap | No internet reachable from the private hosts |
+| Data volumes | Each `nofail` mount is mounted, is **not** backed by the root disk, and is pinned in `fstab` by UUID |
+| PKI anchor | The root CA is in the compiled trust bundle on every host |
+| TLS endpoints | The bastion repo, Keycloak issuer, and Redfish BMC each present a chain that verifies — the enabled subset, so the loop follows the feature flags |
+| DNS | `api`, `*.apps`, and `registry` resolve in the internal view; `api` and `*.apps` resolve via Route53 |
+| NTP | Chrony is synchronised |
+| HAProxy | Stats respond and the fronted ports are bound |
+| KVM + Redfish | libvirtd up, one domain defined per `ocp_nodes` entry, the Redfish API lists them |
+| Keycloak | The discovery document is served and its `issuer` matches `keycloak_issuer_url` exactly, and the port is reachable from the cluster subnet |
 
 ---
 
@@ -827,6 +1061,9 @@ inventory/group_vars/all.yml          # Lowest precedence — global defaults
   ├── project_tag: disconnected-sandbox
   ├── ssh_key_name: {{ project_tag }}-key
   ├── ssh_key_path: ~/.ssh/{{ project_tag }}.pem
+  ├── sandbox_preserve_ssh_key: true   # teardown keeps the key pair
+  ├── sandbox_known_hosts: ~/.ssh/known_hosts.{{ project_tag }}
+  │                                    # ansible.cfg repeats this path literally
   ├── ansible_user: ec2-user
   ├── ansible_ssh_private_key_file: {{ ssh_key_path }}
   │
@@ -852,6 +1089,8 @@ inventory/group_vars/all.yml          # Lowest precedence — global defaults
   ├── ocp_node_ips: (derived)             # ocp_nodes | map(attribute='ip')
   ├── api_vip: (derived)                  # 10.0.2.{start + count} — keepalived API VIP
   ├── ingress_vip: (derived)              # 10.0.2.{start + count + 1} — keepalived Ingress VIP
+  │                                       # Both collapse to the single node's IP when
+  │                                       # ocp_node_count == 1 (SNO has no keepalived)
   │
   │ INSTANCE TYPES & VOLUMES (here, not per-group, because Phase 1 runs
   │ on localhost which does not load per-group group_vars):
@@ -860,10 +1099,17 @@ inventory/group_vars/all.yml          # Lowest precedence — global defaults
   ├── services_instance_type: (derived)   # t3.large when enable_keycloak_idp, else t3.medium
   ├── services_root_volume_size: 50
   ├── registry_instance_type: t3.large
-  ├── registry_root_volume_size: 50
-  ├── registry_data_volume_size: 500
+  ├── registry_root_volume_size: 200
+  ├── registry_data_volume_size: 500      # mounted at /data by the data_volume role
   ├── registry_port: 8443
+  ├── instance_wait_timeout: 1800         # m5.metal termination, see §4.6
+  │
+  │ BASTION PACKAGE REPO:
   ├── bastion_repo_port: 8080
+  ├── bastion_repo_tls: {{ sandbox_tls_everywhere }}
+  ├── bastion_repo_scheme: (derived)      # https | http
+  ├── bastion_repo_url: (derived)         # {{ scheme }}://{{ bastion_private_ip }}:{{ port }}
+  ├── bastion_repo_container_dir_name: container-images
   │
   │ KVM BARE METAL SIMULATION (optional):
   ├── enable_kvm_host: true               # Toggle KVM host provisioning
@@ -874,16 +1120,37 @@ inventory/group_vars/all.yml          # Lowest precedence — global defaults
   ├── kvm_reserved_vcpu: 8                # held back from VMs for the hypervisor
   ├── kvm_reserved_memory_mb: 16384       # held back from VMs for the hypervisor
   ├── redfish_port: 8000
+  ├── redfish_scheme / redfish_url: (derived from sandbox_tls_everywhere)
   │
   │ OIDC IDENTITY PROVIDER (optional):
   ├── enable_keycloak_idp: false          # Off by default — needs registry credentials
   ├── keycloak_port: 8443
   ├── keycloak_realm: openshift
   ├── keycloak_hostname: keycloak.{{ cluster_domain }}
+  ├── keycloak_issuer_url: (derived)      # what the cluster federates to; validate.yml
+  │                                       # asserts the discovery document matches it
+  ├── keycloak_ca_cert_path: /etc/pki/keycloak/keycloak-ca.crt
+  │                                       # now a published copy of the environment root
+  ├── keycloak_image / keycloak_postgres_image
+  ├── keycloak_image_archives: [...]      # image → tar name, so the bastion end and the
+  │                                       # services end cannot drift
+  │
+  │ ENVIRONMENT PKI (§8):
+  ├── sandbox_tls_everywhere: true        # master switch for the TLS posture
+  ├── sandbox_ca_cert_path: /etc/pki/ca-trust/source/anchors/sandbox-ca.crt
+  ├── sandbox_preserve_ca: true           # intent flag; nothing currently reads it
+  │                                       # (pki_preserve_ca is defined and unused, and
+  │                                       # teardown never deletes artifacts/pki anyway)
+  │   NOTE: pki_ca_dir is deliberately NOT set here. It is anchored to the role's own
+  │   location ({{ role_path }}/../../artifacts/pki) so it resolves the same however
+  │   ansible was invoked — playbook_dir follows the playbook, and inventory_dir is
+  │   undefined for the implicit localhost you get when the inventory yields no hosts.
   │
   │ HARDENING:
   ├── rhel_hardening_enable_fips: true
   ├── rhel_hardening_apply_stig: true
+  ├── rhel_hardening_allow_oci_runtime: true   # fapolicyd rules for containers
+  ├── rhel_hardening_reboot_timeout: 1200      # m5.metal again
   └── rhel_hardening_stig_profile: xccdf_org.ssgproject.content_profile_stig
 
 inventory/group_vars/role_bastion.yml
@@ -895,7 +1162,7 @@ inventory/group_vars/private_hosts.yml
         ec2-user@{{ hostvars[groups['role_bastion'][0]].ansible_host }}"
 
 inventory/group_vars/role_services.yml
-  └── (no vars — chrony_ntp_allow_subnet defaults to private_subnet_cidr)
+  └── (no vars — chrony_ntp_allow_subnet defaults to private_subnet_cidr in all.yml)
 
 inventory/group_vars/role_registry.yml
   └── (infrastructure-only marker — no vars beyond all.yml)
@@ -935,6 +1202,14 @@ name is silently ignored: Ansible does not warn about a group_vars file that mat
 | Source/dest check disabled | Less AWS network filtering | Required for bridge + proxy ARP — the ENI forwards traffic to/from VMs with different MAC addresses |
 | sushy-tools pip wheels | Extra bastion repo step | Air-gapped pip install; bastion downloads wheels while it has internet, KVM host installs offline |
 | KVM host optional | Feature toggle complexity | `enable_kvm_host` (default true); when false, all KVM resources skip and role_kvm group is empty |
+| One CA for the whole sandbox | A single root to protect | Replaces two unrelated private CAs and two plaintext services; the cluster trusts one bundle and gets every endpoint with it |
+| CA private key on the controller | Operator workstation becomes the root of trust | Nothing in the sandbox needs it — hosts send a CSR — so a compromised sandbox host cannot read it |
+| TLS on the repo, BMC and issuer | A certificate problem can strand air-gapped hosts | `sandbox_tls_everywhere=false`, or the per-service flags, is the escape hatch; the pki play runs first so trust exists before the first HTTPS fetch |
+| 397-day leaf certificates | Shorter than the 825 days inherited from keycloak_idp | Apple rejects TLS server certificates valid longer than 398 days; `openssl` accepts them, so a longer one only fails when an operator opens the endpoint on macOS |
+| Data volumes mounted by UUID | Two tasks instead of one | AWS renames NVMe devices across reboots; a device path in fstab pointed `/data` at the root disk once. `nofail` keeps boot safe but hides the failure, so validate.yml re-checks both mounts |
+| SSH key and CA preserved on teardown | Stale material survives a destroy | Stable fingerprints across rebuilds; the alternative invalidates every cached copy, the ssh-agent entry most of all |
+| Sandbox-scoped known_hosts | One more path to keep in sync (ansible.cfg cannot template) | Static private IPs are recycled every rebuild and FIPS changes every host key; this keeps that churn out of the operator's real known_hosts |
+| Keycloak published through HAProxy | One more frontend and firewall port | The admin console and discovery document are reachable without an SSH tunnel; TCP passthrough means the client still verifies Keycloak's own certificate |
 
 ---
 
@@ -961,8 +1236,11 @@ Console and API from the internet. The bastion bridges this gap as an L4 reverse
   │  │     server api-vip 10.0.2.103    │
   │  ├── *:443  → backend apps          │
   │  │     server ingress-vip 10.0.2.104│
-  │  └── *:80   → backend apps-http     │
-  │        server ingress-vip 10.0.2.104│
+  │  ├── *:80   → backend apps-http     │
+  │  │     server ingress-vip 10.0.2.104│
+  │  └── *:8443 → backend keycloak      │
+  │        server services 10.0.2.10    │
+  │        (only when enable_keycloak_idp)│
   └──────────────────┬──────────────────┘
                      │ VPC local route (10.0.0.0/16)
                      ▼
@@ -976,7 +1254,8 @@ Console and API from the internet. The bastion bridges this gap as an L4 reverse
 ```
 
 IPs shown above are defaults for `ocp_topology: compact` (3 masters). VIPs shift when the
-node count changes (see §5 Variable Hierarchy).
+node count changes, and for `sno` they collapse onto the single node's IP — there is no
+keepalived on a one-node cluster (see §5 Variable Hierarchy).
 
 ### 7.2 Split-Horizon DNS
 
@@ -987,7 +1266,10 @@ Two DNS views serve the same names with different targets:
 | `api.ocp.{{ sandbox_domain }}`          | → Bastion EIP        | → 10.0.2.103 (API VIP)    |
 | `api-int.ocp.{{ sandbox_domain }}`      | (not published)      | → 10.0.2.103 (API VIP)    |
 | `*.apps.ocp.{{ sandbox_domain }}`       | → Bastion EIP        | → 10.0.2.104 (Ingress VIP)|
+| `keycloak.ocp.{{ sandbox_domain }}`     | → Bastion EIP (IdP only) | → 10.0.2.10           |
 | `registry.ocp.{{ sandbox_domain }}`     | (not published)      | → 10.0.2.20               |
+| `services` / `bastion` / `kvm`          | (not published)      | → 10.0.2.10 / 10.0.1.10 / 10.0.2.30 |
+| `master-N` / `worker-N`                 | (not published)      | → node IPs from `ocp_nodes` |
 
 Both external and internal traffic converge on the same VIPs. External clients (browser,
 `oc` CLI) resolve via Route53 → bastion EIP → HAProxy → VIPs. Internal clients (OCP nodes,
@@ -1011,3 +1293,84 @@ The HAProxy ingress does NOT break the air-gap:
 - HAProxy forwards **inbound** traffic only — it initiates connections to private IPs
 - The bastion is the only host with an internet-facing interface
 - No new routes, NAT, or VPC endpoints are added to the private subnet
+
+---
+
+## 8. Environment PKI
+
+One certificate authority signs every TLS endpoint in the sandbox. `roles/pki` owns it, and it is
+the first thing Phase 2 does — see §4.3 Step 2.0.0 for why the ordering is load-bearing.
+
+### 8.1 Where the material lives
+
+| Path | Contents | Notes |
+|---|---|---|
+| `artifacts/pki/sandbox-ca.key` | Root CA private key | **Controller only.** No sandbox host ever holds it. `0600`, gitignored |
+| `artifacts/pki/sandbox-ca.crt` | Root CA certificate | RSA 3072 / SHA-256, `CA:TRUE`, `keyCertSign` + `cRLSign`, 10-year validity |
+| `/etc/pki/ca-trust/source/anchors/sandbox-ca.crt` | The anchor, on every host | Compiled into the openssl/curl/python/podman bundles by `update-ca-trust extract` |
+| `artifacts/pki/cluster/` | Pre-issued handoff certificates | Plus a generated `README.md` with the consuming commands |
+
+### 8.2 How a leaf is issued
+
+`include_role: {name: pki, tasks_from: issue.yml}` with `pki_issue_name`, `pki_issue_common_name`,
+`pki_issue_sans` and `pki_issue_dir`. The dance is four steps rather than two because of where the
+key is allowed to exist:
+
+```
+  TARGET HOST                          CONTROLLER
+  ───────────                          ──────────
+  generate private key  ──────┐
+  generate CSR  ──────────────┼──────► sign with the root CA
+                              │        (community.crypto, delegate_to: localhost)
+  install certificate  ◄──────┴──────  return the certificate only
+```
+
+The private key is generated on the host that will serve with it and never leaves. Only the CSR
+travels to the controller, and only the certificate comes back.
+
+Two constraints are baked into the role and worth knowing before adding an endpoint:
+
+- **SANs must be FQDNs or IPs.** A bare single-label name like `DNS:services` makes macOS reject
+  the *entire* certificate with "unsupported or invalid name syntax", which names the wrong
+  problem. `openssl` accepts it, so this only surfaces when someone opens the endpoint in a browser.
+- **Leaves are valid 397 days** (`pki_cert_validity`). Apple caps TLS server certificates at 398.
+  Changing the variable does not reissue anything — `community.crypto` ignores timestamp drift by
+  design, or relative validity would churn on every run. Delete the `.crt` and re-run to rotate.
+
+### 8.3 Current endpoints
+
+| Endpoint | Issued by | Flag | Notes |
+|---|---|---|---|
+| Bastion package repo `:8080` | `bastion_repo/tasks/tls.yml` | `bastion_repo_tls` | IP SAN — hosts reach it before BIND9 exists |
+| Keycloak issuer `:8443` | `keycloak_idp/tasks/tls.yml` | `enable_keycloak_idp` | Keycloak terminates TLS itself; HAProxy passes it through |
+| Redfish BMC `:8000` | `redfish_bmc/tasks/tls.yml` | `redfish_bmc_tls` | sushy-emulator terminates it directly |
+| Mirror registry | `pki/tasks/cluster_artifacts.yml` | always | Handoff artifact — nothing in this repo installs it |
+| OpenShift API / ingress | `pki/tasks/cluster_artifacts.yml` | always | Handoff artifacts, applied after the cluster is up |
+
+`validate.yml` connects to each enabled endpoint and asserts `Verify return code: 0 (ok)` against
+the host's own trust store. Add a TLS endpoint and add it to that list in the same change,
+otherwise nothing proves it chains anywhere.
+
+### 8.4 Handoff artifacts
+
+The mirror registry and the cluster are configured by other work, so their certificates are issued
+up front rather than when that work happens:
+
+| File | Consumer |
+|---|---|
+| `registry.crt` / `.key` | `mirror-registry --sslCert/--sslKey` |
+| `api.crt` / `.key` | `APIServer` named certificate — SANs include `api-int`, the name the control plane uses to reach itself |
+| `ingress.crt` / `.key` | `IngressController` default certificate — `*.apps` one level only, matching OpenShift's own scoping |
+| `install-config-additionalTrustBundle.yaml` | Pasted into `install-config.yaml` |
+
+`additionalTrustBundle` is the one that is not optional: the installer and every node verify the
+mirror registry against it before they can pull a single image. Wrong or missing, the cluster fails
+to bootstrap with image pull errors that never mention certificates. It is emitted as an indented
+install-config fragment rather than a bare PEM because the indentation is the part people get wrong.
+
+### 8.5 Lifecycle
+
+The CA is created once and reused: `openssl_privatekey` only writes when the file is missing, and
+teardown does not touch `artifacts/`. Delete the directory to mint a new root. Note that
+`sandbox_preserve_ca` / `pki_preserve_ca` express that intent but are currently read by nothing —
+preservation is a property of teardown leaving the directory alone, not of the flag.
