@@ -197,7 +197,9 @@ Private hosts are reached through the bastion automatically via `ProxyCommand`.
 
 ### 8. Install OpenShift
 
-Populate the mirror registry, then follow
+[Populate the mirror registry](https://bgregori.github.io/disconnected-prep/) — mirroring
+the payload and operators, transferring them across the airgap, and standing up
+`mirror-registry` — then follow
 [the agent-based install guide](agent-based-install.md): write `install-config.yaml` and
 `agent-config.yaml`, generate the ISO, and boot the VMs through the Redfish BMC.
 
