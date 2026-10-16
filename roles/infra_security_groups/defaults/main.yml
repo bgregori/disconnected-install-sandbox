@@ -15,3 +15,82 @@ infra_security_groups_redfish_port: "{{ redfish_port }}"
 infra_security_groups_keycloak_port: "{{ keycloak_port }}"
 infra_security_groups_api_vip: "{{ api_vip }}"
 infra_security_groups_ingress_vip: "{{ ingress_vip }}"
+infra_security_groups_ocp_nodes: "{{ ocp_nodes }}"
+
+# Ports the registry host needs on every OCP node to drive an agent-based
+# install from there, as docs/agent-based-install.md tells the reader to:
+# ssh for `openshift-install gather`, 6443 for the Kubernetes API before the
+# VIP is live, and 8090 for the assisted-service REST API that
+# `agent wait-for bootstrap-complete` actually polls on the rendezvous node.
+infra_security_groups_registry_node_ports:
+  - port: 22
+    desc: SSH - openshift-install gather
+  - port: 6443
+    desc: Kubernetes API before the VIP is live
+  - port: 8090
+    desc: assisted-service REST - agent wait-for bootstrap-complete
+
+# Fixed half of the registry egress policy. It lives here rather than inline
+# in the task because the task has to concatenate it with the per-node rules
+# below, and a task value can be a literal list or a template, not both.
+infra_security_groups_registry_egress_fixed:
+  - proto: tcp
+    ports: 53
+    cidr_ip: "{{ infra_security_groups_services_ip }}/32"
+    rule_desc: DNS to services host
+  - proto: udp
+    ports: 53
+    cidr_ip: "{{ infra_security_groups_services_ip }}/32"
+    rule_desc: DNS to services host
+  - proto: udp
+    ports: 123
+    cidr_ip: "{{ infra_security_groups_services_ip }}/32"
+    rule_desc: NTP to services host
+  - proto: tcp
+    ports: "{{ infra_security_groups_bastion_repo_port }}"
+    cidr_ip: "{{ infra_security_groups_bastion_ip }}/32"
+    rule_desc: Bastion local yum repo
+  - proto: tcp
+    ports: 6443
+    cidr_ip: "{{ infra_security_groups_api_vip }}/32"
+    rule_desc: Kubernetes API to OCP cluster
+  - proto: tcp
+    ports: 443
+    cidr_ip: "{{ infra_security_groups_ingress_vip }}/32"
+    rule_desc: HTTPS routes to OCP cluster
+  # The agent ISO is scp'd from the registry to the KVM host's libvirt image
+  # pool. cidr_ip rather than the KVM group id: this SG is built before the
+  # KVM one (which references this group id for its own ingress, so the
+  # order cannot be swapped) and the KVM host is optional anyway.
+  - proto: tcp
+    ports: 22
+    cidr_ip: "{{ infra_security_groups_kvm_ip }}/32"
+    rule_desc: SSH to KVM host - stage the agent ISO
+
+# One egress rule per node per port above. Generated from ocp_nodes rather
+# than written out: the topology can be sno, compact or standard. These use
+# cidr_ip because the nodes are libvirt VMs on secondary IPs of the KVM host
+# ENI and have no security group of their own to reference by id.
+#
+# A rule the fixed list already grants is skipped. On sno the VIPs collapse
+# onto the single node's IP, so api_vip:6443 and master-0:6443 are the same
+# grant with two different descriptions -- and the module deduplicates on
+# the whole rule dict, description included, so both would survive and AWS
+# would reject the pair as a duplicate permission.
+infra_security_groups_registry_node_egress: >-
+  {{ (infra_security_groups_registry_node_egress_yaml | from_yaml) or [] }}
+infra_security_groups_registry_node_egress_yaml: |
+  {% set covered = [] %}
+  {% for rule in infra_security_groups_registry_egress_fixed %}
+  {% set _ = covered.append(rule.proto ~ ':' ~ rule.ports ~ ':' ~ rule.cidr_ip) %}
+  {% endfor %}
+  {% for node in infra_security_groups_ocp_nodes %}
+  {% for entry in infra_security_groups_registry_node_ports %}
+  {% if 'tcp:' ~ entry.port ~ ':' ~ node.ip ~ '/32' not in covered %}
+  - proto: tcp
+    ports: {{ entry.port }}
+    cidr_ip: {{ node.ip }}/32
+    rule_desc: {{ entry.desc }} on {{ node.hostname }}
+  {% endif %}
+  {% endfor %}
+  {% endfor %}

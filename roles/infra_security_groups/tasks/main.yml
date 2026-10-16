@@ -154,31 +154,12 @@
         ports: 8443
         group_id: "{{ infra_security_groups_bastion_result.group_id }}"
         rule_desc: "Registry HTTPS from bastion - oc mirror content push"
-    rules_egress:
-      - proto: tcp
-        ports: 53
-        cidr_ip: "{{ infra_security_groups_services_ip }}/32"
-        rule_desc: "DNS to services host"
-      - proto: udp
-        ports: 53
-        cidr_ip: "{{ infra_security_groups_services_ip }}/32"
-        rule_desc: "DNS to services host"
-      - proto: udp
-        ports: 123
-        cidr_ip: "{{ infra_security_groups_services_ip }}/32"
-        rule_desc: "NTP to services host"
-      - proto: tcp
-        ports: "{{ infra_security_groups_bastion_repo_port }}"
-        cidr_ip: "{{ infra_security_groups_bastion_ip }}/32"
-        rule_desc: "Bastion local yum repo"
-      - proto: tcp
-        ports: 6443
-        cidr_ip: "{{ infra_security_groups_api_vip }}/32"
-        rule_desc: "Kubernetes API to OCP cluster"
-      - proto: tcp
-        ports: 443
-        cidr_ip: "{{ infra_security_groups_ingress_vip }}/32"
-        rule_desc: "HTTPS routes to OCP cluster"
+    # Split across two variables in defaults/main.yml: the fixed
+    # infrastructure rules, plus one rule per OCP node per install port,
+    # derived from ocp_nodes so the shape follows the topology.
+    rules_egress: >-
+      {{ infra_security_groups_registry_egress_fixed
+         + infra_security_groups_registry_node_egress }}
     tags:
       Name: "{{ infra_security_groups_project_tag }}-registry"
       Project: "{{ infra_security_groups_project_tag }}"
@@ -201,6 +182,12 @@
         ports: "{{ infra_security_groups_redfish_port }}"
         group_id: "{{ infra_security_groups_bastion_result.group_id }}"
         rule_desc: "Redfish BMC from bastion"
+      # The agent ISO is generated on the registry host and copied into the
+      # libvirt image pool here, so the registry needs ssh to this host too.
+      - proto: tcp
+        ports: 22
+        group_id: "{{ infra_security_groups_registry_result.group_id }}"
+        rule_desc: "SSH from registry - stage the agent ISO"
     rules_egress:
       - proto: tcp
         ports: 53
@@ -260,6 +247,22 @@
         ports: 22
         group_id: "{{ infra_security_groups_bastion_result.group_id }}"
         rule_desc: "SSH from bastion"
+      # The agent-based install is driven from the registry host: it holds
+      # the install directory, so it is what runs `agent wait-for` and
+      # `gather`. 6443 is also covered by the VPC-wide rule below, but is
+      # stated here so the intent survives that rule being narrowed.
+      - proto: tcp
+        ports: 22
+        group_id: "{{ infra_security_groups_registry_result.group_id }}"
+        rule_desc: "SSH from registry - openshift-install gather"
+      - proto: tcp
+        ports: 6443
+        group_id: "{{ infra_security_groups_registry_result.group_id }}"
+        rule_desc: "Kubernetes API from registry before the VIP is live"
+      - proto: tcp
+        ports: 8090
+        group_id: "{{ infra_security_groups_registry_result.group_id }}"
+        rule_desc: "assisted-service REST from registry - agent wait-for bootstrap-complete"
       # External-facing (from VPC — bastion HAProxy is on public subnet)
       - proto: tcp
         ports: 80
