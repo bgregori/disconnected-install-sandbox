@@ -3,6 +3,33 @@
 # Requires: Phase 1 complete, dynamic inventory populated
 # Connection: SSH via bastion ProxyCommand
 
+# Step 2.0: Wait for every managed host to answer SSH
+#
+# FIRST, before any play targets a host. An unreachable host is not a
+# recoverable failure in Ansible: it is dropped from the play and from every
+# play that follows, so the run finishes green with that host untouched. The
+# damage surfaces much later and somewhere else -- a missing libvirt, an
+# empty trust anchor directory -- with nothing pointing back to a connection
+# that was refused twenty minutes earlier.
+#
+# The KVM host is the one that provokes it. infra_ec2 waits on
+# `ec2_instance`, which returns when EC2 reports the instance running, and an
+# m5.metal reaches that state minutes before sshd is listening -- bare metal
+# POST is not quick. site.yml then waits only for the bastion before
+# importing this playbook, so on a cold build the hostname play below can
+# reach role_kvm while it is still powering on.
+#
+# Costs nothing on a host that is already up, which is the usual case when
+# this playbook is run on its own.
+- name: wait for every host to answer ssh
+  hosts: role_bastion:role_services:role_registry:role_kvm
+  gather_facts: false
+  become: false
+  tasks:
+    - name: wait for ssh to answer
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ host_ssh_wait_timeout }}"
+
 # Set hostnames on all hosts
 - name: set bastion hostname
   hosts: role_bastion
