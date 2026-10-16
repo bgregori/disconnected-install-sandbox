@@ -302,18 +302,24 @@ ssh -F ~/.ssh/config.d/disconnected-sandbox kvm-sandbox       # when KVM enabled
 **Redfish BMC** (from bastion, when KVM enabled):
 ```bash
 # List OCP node VMs
-curl http://10.0.2.30:8000/redfish/v1/Systems/
+curl https://10.0.2.30:8000/redfish/v1/Systems/
 # Power on a VM
-curl -X POST http://10.0.2.30:8000/redfish/v1/Systems/<uuid>/Actions/ComputerSystem.Reset \
+curl -f -X POST https://10.0.2.30:8000/redfish/v1/Systems/<uuid>/Actions/ComputerSystem.Reset \
   -H 'Content-Type: application/json' -d '{"ResetType": "On"}'
-# Mount agent ISO
-curl -X POST http://10.0.2.30:8000/redfish/v1/Managers/<uuid>/VirtualMedia/Cd/Actions/VirtualMedia.InsertMedia \
+# Mount agent ISO - VirtualMedia is under Systems, the Managers path 404s
+curl -f -X POST https://10.0.2.30:8000/redfish/v1/Systems/<uuid>/VirtualMedia/Cd/Actions/VirtualMedia.InsertMedia \
   -H 'Content-Type: application/json' -d '{"Image": "file:///var/lib/libvirt/images/agent.x86_64.iso"}'
 ```
 
+https, not http: `sandbox_tls_everywhere` defaults on, so sushy-emulator terminates
+TLS itself. See [docs/agent-based-install.md](docs/agent-based-install.md) for the
+full boot sequence, including the staging hop the ISO copy needs.
+
 **Agent-Based Installer workflow** (after mirror-registry is configured):
 1. Generate the agent ISO: `openshift-install agent create image`
-2. SCP the ISO to the KVM host: `scp -F ~/.ssh/config.d/disconnected-sandbox agent.x86_64.iso kvm-sandbox:/var/lib/libvirt/images/`
+2. SCP the ISO to the KVM host home dir, then `sudo install` + `restorecon` it into
+   `/var/lib/libvirt/images/` — that directory is `root:root 0755`, so scp cannot
+   write to it directly and an unrelabelled file will not open as `virt_image_t`
 3. From the bastion, mount the ISO and boot each VM via Redfish API
 4. VMs boot from the ISO, discover peers, and form the OpenShift cluster
 

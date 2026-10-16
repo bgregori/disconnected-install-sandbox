@@ -168,12 +168,32 @@ is also created with `kubeconfig` and `kubeadmin-password` for post-install acce
 
 ## 3. Transfer the ISO to the KVM host
 
-From the registry host, SCP through the bastion:
+`/var/lib/libvirt/images` is `root:root 0755`, so `ec2-user` cannot write into it
+directly — the ISO has to land in the home directory first and then be moved into
+place with `sudo`. Use `install` rather than `mv`: it sets the ownership and mode
+in one step, and `restorecon` then gives the file the `virt_image_t` label libvirt
+needs to open it. A file moved in without relabelling inherits `user_home_t` and
+the domain fails to start with a permission denied that does not mention SELinux.
+
+From the registry host:
 
 ```bash
 scp -i ~/.ssh/disconnected-sandbox.pem \
   agent.x86_64.iso \
-  ec2-user@10.0.2.30:/var/lib/libvirt/images/
+  ec2-user@10.0.2.30:/home/ec2-user/
+
+ssh -i ~/.ssh/disconnected-sandbox.pem ec2-user@10.0.2.30 '
+  sudo install -o root -g root -m 0644 \
+    /home/ec2-user/agent.x86_64.iso /var/lib/libvirt/images/ &&
+  sudo restorecon -v /var/lib/libvirt/images/agent.x86_64.iso &&
+  rm -f /home/ec2-user/agent.x86_64.iso'
+```
+
+Confirm the label before moving on — this is the one failure that surfaces late:
+
+```bash
+ls -Z /var/lib/libvirt/images/agent.x86_64.iso
+# system_u:object_r:virt_image_t:s0
 ```
 
 ## 4. Boot VMs via Redfish virtual media
@@ -181,10 +201,16 @@ scp -i ~/.ssh/disconnected-sandbox.pem \
 The `redfish_bmc` role runs sushy-emulator on the KVM host (port 8000), and the
 `kvm_host` role runs an HTTP server on port 8888 to serve the ISO.
 
+Redfish is **https**: `sandbox_tls_everywhere` defaults to `true`, so sushy-emulator
+is given `SUSHY_EMULATOR_SSL_CERT`/`_KEY` and serves TLS directly — nothing proxies
+it. No `-k` is needed, because the hosts carry the sandbox root CA as a trust anchor.
+The ISO server on 8888 is separate and stays plain HTTP, so the `Image` URL below is
+`http://`, not a typo.
+
 ### Find the VM system UUID
 
 ```bash
-curl -s http://10.0.2.30:8000/redfish/v1/Systems/ | python3 -m json.tool
+curl -s https://10.0.2.30:8000/redfish/v1/Systems/ | python3 -m json.tool
 ```
 
 Each VM appears as a Redfish system with its libvirt UUID.
@@ -196,22 +222,37 @@ VM_UUID=<uuid-from-above>
 KVM_IP=10.0.2.30
 
 # Insert the ISO as virtual media
-curl -X POST \
-  http://${KVM_IP}:8000/redfish/v1/Managers/${VM_UUID}/VirtualMedia/Cd/Actions/VirtualMedia.InsertMedia \
+curl -f -X POST \
+  https://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID}/VirtualMedia/Cd/Actions/VirtualMedia.InsertMedia \
   -H 'Content-Type: application/json' \
   -d "{\"Image\": \"http://${KVM_IP}:8888/agent.x86_64.iso\", \"Inserted\": true}"
 
 # Set boot to CD-ROM for next boot
-curl -X PATCH \
-  http://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID} \
+curl -f -X PATCH \
+  https://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID} \
   -H 'Content-Type: application/json' \
   -d '{"Boot": {"BootSourceOverrideTarget": "Cd", "BootSourceOverrideMode": "UEFI", "BootSourceOverrideEnabled": "Once"}}'
 
 # Power on the VM
-curl -X POST \
-  http://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID}/Actions/ComputerSystem.Reset \
+curl -f -X POST \
+  https://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID}/Actions/ComputerSystem.Reset \
   -H 'Content-Type: application/json' \
   -d '{"ResetType": "On"}'
+```
+
+> **VirtualMedia lives under `Systems`, not `Managers`.** This emulator exposes it
+> at `/redfish/v1/Systems/<uuid>/VirtualMedia/Cd`; the `Managers` path returns 404.
+> That 404 is easy to miss, because the boot-override and power-on calls that follow
+> it still return 204 — the VM powers on correctly with no media attached and sits
+> at the UEFI shell or PXE-boots instead. Hence `-f` on each curl above: without it
+> the insert failure is silent and only shows up minutes later on the VNC console.
+
+Confirm the media actually attached before powering on:
+
+```bash
+curl -s https://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID}/VirtualMedia/Cd \
+  | python3 -m json.tool
+# "Inserted": true, "Image": "http://10.0.2.30:8888/agent.x86_64.iso"
 ```
 
 For multi-node clusters, repeat for each VM UUID.
@@ -243,8 +284,11 @@ openshift-install agent wait-for bootstrap-complete --dir . --log-level info
 openshift-install agent wait-for install-complete --dir . --log-level info
 ```
 
-> These commands require network connectivity from the registry to the VM (port 22).
-> The registry security group must have egress to the node IPs.
+> These need the registry to reach the nodes directly: 22 for `openshift-install
+> gather`, 6443 for the API before the VIP is live, and 8090 for the
+> assisted-service REST API that `agent wait-for bootstrap-complete` polls on the
+> rendezvous node. `infra_security_groups` opens all three, per node, derived from
+> `ocp_nodes` — nothing to add by hand.
 
 ### From the KVM host (VNC or SSH)
 
