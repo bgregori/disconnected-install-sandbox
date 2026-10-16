@@ -281,6 +281,13 @@ kvm_instance_type: m5.metal
 # instance. The symptom was a teardown that always needed running twice.
 # rhel_hardening_reboot_timeout is 1200 for the same underlying reason.
 instance_wait_timeout: 1800
+# How long phase2_configure.yml waits for a host to answer SSH. Separate
+# from instance_wait_timeout because the two measure different things:
+# ec2_instance's `wait` returns when EC2 reports the instance running, and
+# bare metal reaches that state minutes before sshd is listening. This is
+# the metal host's budget; the t3 instances answer in about a minute and
+# cost nothing by sharing it.
+host_ssh_wait_timeout: 1800
 kvm_root_volume_size: 200
 # Sized for the selected topology - override with -e kvm_data_volume_size=<gb>
 kvm_data_volume_size: "{{ ocp_topology_spec.data_volume_size }}"
