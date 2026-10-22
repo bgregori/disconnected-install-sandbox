@@ -14,6 +14,9 @@ infra_ec2_kvm_ip: "{{ kvm_private_ip }}"
 infra_ec2_kvm_root_volume_size: "{{ kvm_root_volume_size }}"
 infra_ec2_kvm_data_volume_size: "{{ kvm_data_volume_size }}"
 infra_ec2_kvm_secondary_ips: "{{ (ocp_node_ips + [api_vip, ingress_vip]) | unique }}"
+# Written to the KVM instance as its ocp_topology tag, so later runs that omit
+# -e ocp_topology can discover it (see ocp_topology_built in group_vars/all.yml).
+infra_ec2_kvm_topology: "{{ ocp_topology }}"
 
 # How long to wait for an instance to reach its target state.
 infra_ec2_wait_timeout: "{{ instance_wait_timeout }}"

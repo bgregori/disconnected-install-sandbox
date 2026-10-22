@@ -87,7 +87,11 @@ registry_private_ip: "10.0.2.20"
 #   compact   3 schedulable masters, no dedicated workers
 #   standard  3 masters + 3 workers
 #
-# Select at runtime with -e ocp_topology=standard
+# Select at runtime with -e ocp_topology=standard. Only the build needs it: Phase 1
+# tags the KVM instance with the topology it was built with, and later runs that
+# omit -e ocp_topology read the tag back instead of falling back to compact. A run
+# that passes a different topology than the tag fails before it changes anything
+# (playbooks/topology_check.yml) -- changing topology means a rebuild.
 #
 # Every derived value stays individually overridable, so you only set what you
 # actually want to change:
@@ -95,7 +99,15 @@ registry_private_ip: "10.0.2.20"
 #
 # All presets fit an m5.metal host (96 vCPU / 384 GiB) with headroom for the
 # hypervisor. data_volume_size covers every VM disk plus room for agent ISOs.
-ocp_topology: compact
+ocp_topology: "{{ ocp_topology_built | default('compact', true) }}"
+
+# Topology the running KVM host was built with, from its ocp_topology tag. Empty
+# before the first build, with enable_kvm_host=false, when the KVM host is not
+# running (the inventory only lists running instances), or on a host built
+# before the tag existed -- all cases where ocp_topology falls back to compact.
+ocp_topology_built: >-
+  {{ hostvars[groups['role_kvm'][0]].aws_tags.ocp_topology | default('')
+     if groups['role_kvm'] | default([]) | length > 0 else '' }}
 
 ocp_topology_presets:
   sno:

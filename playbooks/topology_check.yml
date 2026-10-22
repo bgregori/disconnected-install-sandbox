@@ -1,0 +1,28 @@
+---
+# Make sure this run uses the topology the environment was built with.
+#
+# Nothing persists -e ocp_topology between runs, and everything downstream --
+# BIND records, SSH config, libvirt domains, the validate checks -- is derived
+# from it. Omit it on a Phase 2 or validate run against an SNO build and the
+# default (compact) quietly turns one master into three: validate fails looking
+# for ocp-master-1, and a Phase 2 run tries to define VMs that do not fit.
+#
+# Phase 1 tags the KVM instance with the topology, and group_vars/all.yml reads
+# the tag back into ocp_topology when -e ocp_topology is not given. That covers
+# the omitted case. This check covers the other one: -e ocp_topology given, but
+# different from what was built. Changing topology means a rebuild, so stop.
+#
+# Runs on localhost before any host is touched. Passes when there is no tag to
+# compare against (first build, no KVM host, KVM host not running, or a host
+# built before the tag existed).
+- name: validate ocp_topology matches the built environment
+  ansible.builtin.assert:
+    that:
+      - ocp_topology_built | length == 0 or ocp_topology == ocp_topology_built
+    fail_msg: >-
+      This run asked for ocp_topology '{{ ocp_topology }}' but the KVM host was
+      built as '{{ ocp_topology_built }}'. Drop -e ocp_topology to use the built
+      topology, or tear down and rebuild to change it.
+    success_msg: >-
+      Topology '{{ ocp_topology }}'
+      ({{ 'from the KVM host tag' if ocp_topology_built | length > 0 else 'no KVM host tag to check against' }})

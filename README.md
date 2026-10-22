@@ -235,6 +235,12 @@ the API and ingress VIPs on the two addresses after the last node.
 Phase 1 prints the resolved topology, the full node-to-IP map, and the VIPs when
 it finishes, so you can copy them straight into `agent-config.yaml`.
 
+You only pass `-e ocp_topology` when building. Phase 1 tags the KVM host with it,
+and later Phase 2 and validate runs read the tag back. A later run that passes a
+*different* topology stops before changing anything, since changing topology
+means a rebuild. Per-value overrides (`-e ocp_worker_count=5` and so on) are not
+recorded, so repeat those on every run.
+
 All presets fit an m5.metal host (96 vCPU / 384 GiB) with headroom reserved for
 the hypervisor. Phase 1 fails fast if the data volume is too small for the
 topology, and the `kvm_host` role refuses to define VMs that overcommit the host.

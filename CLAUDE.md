@@ -68,6 +68,12 @@ Every derived value stays individually overridable (`ocp_worker_count`,
 `ocp_master_vcpu`, `kvm_data_volume_size`, …). Keep it that way when extending the
 presets. See README "Cluster Topology" for the full table.
 
+Phase 1 tags the KVM instance `ocp_topology=<topology>`, and `group_vars/all.yml` reads it back
+(`ocp_topology_built`), so Phase 2 and validate runs that omit `-e ocp_topology` use the built
+topology instead of the `compact` fallback. `playbooks/topology_check.yml` fails any run whose
+`-e ocp_topology` differs from the tag. Only the topology name is recorded — per-value overrides
+such as `-e ocp_worker_count=5` are not, and must still be repeated on every run.
+
 ## Execution Commands
 
 ```bash
