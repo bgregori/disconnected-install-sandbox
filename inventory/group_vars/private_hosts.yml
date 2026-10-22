@@ -33,8 +33,12 @@
 #     to host key check failure"), which kills a `ssh -W` ProxyCommand just as
 #     dead. phase2_configure.yml purges sandbox_known_hosts around the FIPS
 #     reboots so this hop never meets a changed bastion key.
+#
+#   - ServerAlive*: the same keepalives ansible.cfg gives the outer connection,
+#     for the same reason -- this hop is the leg that crosses the internet.
 ansible_ssh_common_args: >-
   -o ProxyCommand="ssh -W %h:%p -i {{ ssh_key_path }}
   -o UserKnownHostsFile={{ sandbox_known_hosts }}
   -o StrictHostKeyChecking=no
+  -o ServerAliveInterval=30 -o ServerAliveCountMax=6
   ec2-user@{{ hostvars[groups['role_bastion'][0]].ansible_host }}"
