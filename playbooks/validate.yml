@@ -1,4 +1,15 @@
 ---
+# The VM and DNS checks below are derived from ocp_topology. Without this, a run
+# that omits -e ocp_topology validates an SNO build against the compact default.
+- name: check topology against the built environment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: check topology against the built environment
+      ansible.builtin.include_tasks: topology_check.yml
+
 - name: Validate disconnected sandbox — end-to-end checks
   hosts: all
   gather_facts: true

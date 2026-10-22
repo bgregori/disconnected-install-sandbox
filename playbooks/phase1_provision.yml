@@ -35,6 +35,9 @@
       vars:
         phase1_inventory_region: "{{ lookup('env', 'AWS_REGION') | default('us-east-2', true) }}"
 
+    - name: check topology against the built environment
+      ansible.builtin.include_tasks: topology_check.yml
+
     - name: validate topology name
       ansible.builtin.assert:
         that:

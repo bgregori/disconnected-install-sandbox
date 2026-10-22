@@ -28,6 +28,7 @@
       Project: "{{ infra_ec2_project_tag }}"
       Environment: sandbox
       sandbox_role: kvm
+      ocp_topology: "{{ infra_ec2_kvm_topology }}"
     wait: true
     # Bare metal POST is minutes, not seconds. This has fitted inside the
     # 600s default so far, but it is the same instance type whose slowness

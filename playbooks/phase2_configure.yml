@@ -3,6 +3,20 @@
 # Requires: Phase 1 complete, dynamic inventory populated
 # Connection: SSH via bastion ProxyCommand
 
+# Step 2.0.0: Confirm the topology before anything derives from it
+#
+# ocp_topology drives the BIND records, SSH config and libvirt domains below.
+# When -e ocp_topology is omitted it is read back from the KVM host's tag; when
+# it is given, it must match that tag. See topology_check.yml.
+- name: check topology against the built environment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: check topology against the built environment
+      ansible.builtin.include_tasks: topology_check.yml
+
 # Step 2.0: Wait for every managed host to answer SSH
 #
 # FIRST, before any play targets a host. An unreachable host is not a
