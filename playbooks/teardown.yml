@@ -145,9 +145,15 @@
               vpc-id: "{{ teardown_vpc_id }}"
           register: sandbox_sgs
 
+        # name and description are required whenever the module modifies a
+        # group, even one looked up by group_id. Without them every revoke
+        # fails, failed_when hides it, and the references survive.
         - name: revoke all ingress rules to break circular references
           amazon.aws.ec2_security_group:
             group_id: "{{ item.group_id }}"
+            name: "{{ item.group_name }}"
+            description: "{{ item.description }}"
+            vpc_id: "{{ teardown_vpc_id }}"
             region: "{{ aws_region }}"
             rules: []
             purge_rules: true
@@ -159,6 +165,9 @@
         - name: revoke all egress rules to break circular references
           amazon.aws.ec2_security_group:
             group_id: "{{ item.group_id }}"
+            name: "{{ item.group_name }}"
+            description: "{{ item.description }}"
+            vpc_id: "{{ teardown_vpc_id }}"
             region: "{{ aws_region }}"
             rules_egress: []
             purge_rules_egress: true
@@ -292,10 +301,14 @@
           loop_control:
             label: "{{ item.group_name }}"
           register: sg_retry
-          retries: 3
+          retries: 6
           delay: 10
           until: sg_retry is not failed
-          failed_when: false
+          # Not failed_when: false -- that marks every attempt as passed, so
+          # until is satisfied at once and the retries never run. ignore_errors
+          # lets until see the failure, and the checks below report whatever
+          # is still left once the retries run out.
+          ignore_errors: true
 
         - name: confirm nothing is left holding the vpc
           block:
