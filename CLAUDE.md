@@ -44,7 +44,13 @@ AWS credentials MUST be exported as environment variables (never in playbooks):
 ```bash
 export AWS_ACCESS_KEY_ID="AKIA..."
 export AWS_SECRET_ACCESS_KEY="wJalr..."
+export AWS_REGION=us-east-2   # must equal -e aws_region
 ```
+
+The `aws_ec2` inventory plugin cannot see `-e` vars. It reads `AWS_REGION` (default `us-east-2`), and
+Phase 1 asserts the two match. Phase 1 also reads VPC Block Public Access for `aws_region` and stops before
+creating anything if it is on, because that drops all IGW traffic regardless of routes or SGs. The check
+only reads the setting; never change account-level settings from these playbooks. See README "Troubleshooting".
 
 ## Cluster Topology
 

@@ -17,6 +17,10 @@
         host: "{{ infra_ec2_bastion_eip }}"
         port: 22
         timeout: 300
+        msg: >-
+          Bastion {{ infra_ec2_bastion_eip }}:22 never answered. Check that
+          admin_cidr is still your public IP, and that VPC Block Public Access is
+          off: aws ec2 describe-vpc-block-public-access-options --region {{ aws_region }}
       when: infra_ec2_bastion_eip is defined
 
 - name: Phase 2 — configure RHEL 9 services
