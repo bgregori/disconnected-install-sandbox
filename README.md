@@ -90,9 +90,13 @@ pip install boto3 botocore
 ```bash
 export AWS_ACCESS_KEY_ID="AKIA..."
 export AWS_SECRET_ACCESS_KEY="wJalr..."
+export AWS_REGION=us-east-2   # must match -e aws_region below
 ```
 
 > **Never commit these credentials to a git repository.**
+
+The dynamic inventory reads `AWS_REGION`, not `-e aws_region`, and falls back to
+`us-east-2` when it is unset. Phase 1 refuses to run if the two disagree.
 
 2. **Run the full provision + configure**:
 
@@ -154,6 +158,9 @@ These have **no defaults** — playbooks fail fast if not provided:
 | `aws_region` | Your choice | `us-east-2` |
 | `sandbox_domain` | Your Route53 hosted zone | `example.com` |
 | `admin_cidr` | Your public IP + /32 | `203.0.113.42/32` |
+
+Pick a region where VPC Block Public Access is off. Phase 1 checks this before
+creating anything — see [Troubleshooting](#troubleshooting).
 
 ## Cluster Topology
 
@@ -424,3 +431,32 @@ aws ec2 describe-route-tables \
   --filters "Name=tag:Name,Values=disconnected-sandbox-private-rt" \
   --query 'RouteTables[].Routes'
 ```
+
+## Troubleshooting
+
+### Phase 1 stops on "VPC Block Public Access", or site.yml times out waiting for bastion SSH
+
+VPC Block Public Access (BPA) is an account-level setting that AWS applies separately in each
+region. When it is on, AWS drops all traffic through internet gateways in that region. Routes,
+NACLs and security groups all look correct, the bastion passes its status checks, and port 22
+still times out. Each sandbox account comes with whatever its admin set, so one account can
+block `us-east-2` while your last ten did not.
+
+Phase 1 reads the setting before it creates anything. It never changes it. When the target region
+is blocked, Phase 1 stops and lists the regions in `bpa_check_regions` that are clear. To move:
+
+```bash
+export AWS_REGION=us-east-1
+ansible-playbook playbooks/site.yml -e aws_region=us-east-1 \
+  -e sandbox_domain=example.com -e admin_cidr=$(curl -s ifconfig.me)/32
+```
+
+Check a region by hand with:
+
+```bash
+aws ec2 describe-vpc-block-public-access-options --region us-east-2 \
+  --query 'VpcBlockPublicAccessOptions.InternetGatewayBlockMode'
+```
+
+`off` is what you want. If the account admin has added a BPA exclusion for the sandbox,
+pass `-e bpa_check=false` to skip the check.

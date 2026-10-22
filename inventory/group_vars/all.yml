@@ -3,6 +3,9 @@
 # Pass via -e on the command line:
 #   -e aws_region=us-east-2
 #   -e sandbox_domain=example.com
+#
+# For any region other than us-east-2, also export AWS_REGION to match.
+# The dynamic inventory cannot see -e vars and reads AWS_REGION instead.
 #   -e admin_cidr=$(curl -s ifconfig.me)/32
 #
 # AWS credentials must be exported as environment variables:
@@ -19,6 +22,25 @@ cluster_name: ocp
 
 # Tagging
 project_tag: disconnected-sandbox
+
+# VPC Block Public Access pre-flight
+#
+# Block Public Access (BPA) is an account-level, per-region setting. When it is
+# on, AWS drops traffic through every internet gateway in the region regardless
+# of routes, NACLs or security groups -- the bastion comes up healthy but is
+# unreachable, and site.yml times out waiting for SSH. Sandbox accounts are
+# handed out with whatever their admin set, so one account can block us-east-2
+# while another does not.
+#
+# Phase 1 reads the setting (it never changes it) and stops before creating
+# anything if aws_region is blocked, naming the regions below that are clear.
+# Set bpa_check to false if an admin has added a BPA exclusion for you.
+bpa_check: true
+bpa_check_regions:
+  - us-east-1
+  - us-east-2
+  - us-west-1
+  - us-west-2
 
 # SSH
 ssh_key_name: "{{ project_tag }}-key"

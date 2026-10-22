@@ -19,6 +19,22 @@
           -e sandbox_domain=example.com
           -e admin_cidr=$(curl -s ifconfig.me)/32
 
+    # The aws_ec2 inventory plugin cannot see -e vars, so it reads AWS_REGION
+    # (falling back to us-east-2). If the two disagree, Phase 1 builds in one
+    # region, the inventory refresh looks in the other, and Phase 2 silently
+    # matches no hosts.
+    - name: validate inventory region matches aws_region
+      ansible.builtin.assert:
+        that:
+          - phase1_inventory_region == aws_region
+        fail_msg: >-
+          aws_region is '{{ aws_region }}' but the dynamic inventory will search
+          '{{ phase1_inventory_region }}' (from AWS_REGION, default us-east-2).
+          Run: export AWS_REGION={{ aws_region }}
+        quiet: true
+      vars:
+        phase1_inventory_region: "{{ lookup('env', 'AWS_REGION') | default('us-east-2', true) }}"
+
     - name: validate topology name
       ansible.builtin.assert:
         that:
@@ -68,6 +84,62 @@
     - name: display aws account info
       ansible.builtin.debug:
         msg: "Authenticated as {{ aws_identity.arn }} in region {{ aws_region }}"
+
+    # Read-only: reports each region's Block Public Access mode, or 'unknown'
+    # if it cannot be read (boto3 too old, region not opted in, no permission).
+    # amazon.aws has no module for this, so call boto3 directly.
+    - name: read vpc block public access mode
+      ansible.builtin.command:
+        argv: "{{ [ansible_playbook_python, '-c', bpa_script, aws_region]
+                  + (bpa_check_regions | difference([aws_region])) }}"
+      register: bpa_mode_result
+      changed_when: false
+      when: bpa_check | bool
+      vars:
+        bpa_script: |
+          import json, sys, boto3
+          modes = {}
+          for region in sys.argv[1:]:
+              try:
+                  ec2 = boto3.client('ec2', region_name=region)
+                  opts = ec2.describe_vpc_block_public_access_options()
+                  modes[region] = opts['VpcBlockPublicAccessOptions']['InternetGatewayBlockMode']
+              except Exception as exc:
+                  modes[region] = 'unknown: ' + str(exc).splitlines()[0]
+          print(json.dumps(modes))
+
+    - name: warn when block public access could not be read
+      ansible.builtin.debug:
+        msg: >-
+          Could not read VPC Block Public Access for {{ aws_region }}
+          ({{ bpa_modes[aws_region] }}). Continuing; if site.yml later times out
+          waiting for bastion SSH, check it with:
+          aws ec2 describe-vpc-block-public-access-options --region {{ aws_region }}
+      when:
+        - bpa_check | bool
+        - bpa_modes[aws_region] is match('unknown')
+      vars:
+        bpa_modes: "{{ bpa_mode_result.stdout | from_json }}"
+
+    - name: validate block public access allows the bastion
+      ansible.builtin.assert:
+        that:
+          - bpa_modes[aws_region] is not match('block-')
+        fail_msg: >-
+          VPC Block Public Access is '{{ bpa_modes[aws_region] }}' in
+          {{ aws_region }} for account {{ aws_identity.account }}. AWS drops
+          internet traffic to the bastion in this mode, so Phase 2 would time out
+          waiting for SSH. This is an account setting, not a fault in this repo.
+          Nothing has been created. Clear regions checked: {{ bpa_clear_regions }}.
+          Re-run in one of them with export AWS_REGION=<region> and
+          -e aws_region=<region>, or ask the account admin for a BPA exclusion
+          and pass -e bpa_check=false.
+        quiet: true
+      when: bpa_check | bool
+      vars:
+        bpa_modes: "{{ bpa_mode_result.stdout | from_json }}"
+        bpa_clear_regions: "{{ bpa_modes | dict2items | selectattr('value', 'equalto', 'off')
+                               | map(attribute='key') | join(', ') | default('none', true) }}"
 
   roles:
     - role: infra_vpc
