@@ -16,7 +16,13 @@ from it using Redfish virtual media.
   `registry.crt`/`.key` pair Phase 2 left in `artifacts/pki/cluster/`
 - DNS records for `api.ocp.<domain>`, `api-int.ocp.<domain>`, and
   `*.apps.ocp.<domain>` resolve correctly
-- The KVM host VMs are defined but not running (`virsh list --all` shows them as `shut off`)
+- The KVM host VMs are defined (`virsh list --all` lists them). Expect them to be `running`,
+  not `shut off`: they are set to autostart, so the KVM host's STIG reboot starts them, and
+  with no media attached they idle at the firmware. §4 powers them on in a way that works
+  from either state.
+- The services host serves NTP. `validate.yml` checks this ("validate ntp service"); without
+  it the nodes have no time source at all — see
+  [Node clock not synchronised](#node-clock-not-synchronised-nodeclocknotsynchronising).
 - Each VM has a secondary disk (`vdb`) for LVM Storage when the selected
   topology enables one (`sno` and `compact` do; `standard` does not)
 
@@ -102,11 +108,20 @@ hostnames and IPs match what Phase 1 printed and what BIND9 serves:
 
 `rendezvousIP` must be the first master, 10.0.2.100.
 
+`additionalNTPSources` is not optional either. RHCOS ships with only
+`pool 0.rhel.pool.ntp.org`, which is unreachable from the air gap, so without the services
+host here the nodes install and run with no time source: chrony sits at stratum 0 and the
+installed cluster fires `NodeClockNotSynchronising` (critical) from day one. Don't read
+anything into the install-time NTP validation either. It can flag the host as insufficient
+and then pass a minute later without the clock ever having synced.
+
 ```yaml
 apiVersion: v1alpha1
 metadata:
   name: ocp
 rendezvousIP: 10.0.2.100
+additionalNTPSources:
+  - 10.0.2.10          # services host (services_private_ip)
 hosts:
   - hostname: master-0
     role: master
@@ -233,12 +248,23 @@ curl -f -X PATCH \
   -H 'Content-Type: application/json' \
   -d '{"Boot": {"BootSourceOverrideTarget": "Cd", "BootSourceOverrideMode": "UEFI", "BootSourceOverrideEnabled": "Once"}}'
 
-# Power on the VM
+# Power on the VM -- or restart it if it is already running, which on a
+# fresh build it usually is (see Prerequisites). "On" does nothing to a
+# running VM, so it would never reach the ISO.
+POWER=$(curl -fs https://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID} \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["PowerState"])')
+if [ "$POWER" = "On" ]; then RESET=ForceRestart; else RESET=On; fi
 curl -f -X POST \
   https://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID}/Actions/ComputerSystem.Reset \
   -H 'Content-Type: application/json' \
-  -d '{"ResetType": "On"}'
+  -d "{\"ResetType\": \"${RESET}\"}"
 ```
+
+> **"Once" is not one-shot here.** With the libvirt driver, sushy-emulator applies the
+> boot override by making the CD the persistent first boot device. As long as the ISO
+> stays inserted, every boot goes to it, including the reboot after the agent has
+> written RHCOS to disk. That is why §6 ejects the media at a specific point rather
+> than "after install".
 
 > **VirtualMedia lives under `Systems`, not `Managers`.** This emulator exposes it
 > at `/redfish/v1/Systems/<uuid>/VirtualMedia/Cd`; the `Managers` path returns 404.
@@ -305,29 +331,49 @@ journalctl -u assisted-service.service -f
 |-------|-------------|
 | Agent boot | VNC shows kernel loading, `nslookup` checks, registry connectivity checks |
 | Bootstrap | `Waiting for services`, `Cluster installation in progress` |
-| Pivot | Node reboots, installs RHCOS to disk |
+| Pivot | `Writing image to disk: 100%`, then the node reboots — **eject the ISO now** (§6) |
 | Operators | Cluster operators start reconciling |
 | Complete | `Finished Bootkube`, `Reached target Multi-User System` |
 
-## 6. Post-install: eject the ISO
+## 6. Eject the ISO when the image is written
 
-After the node reboots into the installed OS, eject the CDROM so it doesn't boot
-from the ISO again:
+Eject as soon as `agent wait-for` (or the VNC console) shows **`Writing image to disk: 100%`**.
+Don't wait for the install to finish. The CD is the first boot device while media is inserted
+(see the note in §4), so a VM that still has the ISO when it reboots boots the agent again
+instead of the RHCOS it just wrote.
 
-```bash
-# On the KVM host
-sudo virsh change-media ocp-master-0 sda --eject
-```
-
-For multi-node, repeat for each VM.
-
-If the VM has already rebooted into the ISO instead of the installed OS, eject and
-reboot:
+Eject through Redfish, the same interface that inserted the media:
 
 ```bash
-sudo virsh change-media ocp-master-0 sda --eject
-sudo virsh reboot ocp-master-0
+curl -f -X POST \
+  https://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID}/VirtualMedia/Cd/Actions/VirtualMedia.EjectMedia \
+  -H 'Content-Type: application/json' -d '{}'
+# 204 No Content on success
 ```
+
+For multi-node, repeat for each VM UUID.
+
+> **Not `virsh change-media … sda`.** The domain is defined with its CD on `sda`, but
+> sushy-emulator attaches virtual media as its own device (`sdx` on this build), so
+> `sda` targets the wrong device.
+
+### If the VM has already booted the ISO again
+
+You can tell from `agent wait-for`: it loops on `404 v2GetClusterNotFound`, because the
+agent that just booted is a fresh one with no cluster. RHCOS is already on disk, so eject
+and force a restart:
+
+```bash
+curl -f -X POST \
+  https://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID}/VirtualMedia/Cd/Actions/VirtualMedia.EjectMedia \
+  -H 'Content-Type: application/json' -d '{}'
+curl -f -X POST \
+  https://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID}/Actions/ComputerSystem.Reset \
+  -H 'Content-Type: application/json' -d '{"ResetType": "ForceRestart"}'
+```
+
+The node boots from disk and the install carries on. Re-run `agent wait-for` if it
+had given up.
 
 ## 7. Verify the cluster
 
@@ -354,6 +400,79 @@ sudo oc --kubeconfig=/etc/kubernetes/static-pod-resources/kube-apiserver-certs/s
 If nslookup fails with `[::1]:53`, the VM's gateway is misconfigured. Ensure
 `agent-config.yaml` uses `next-hop-address: 10.0.2.30` (KVM bridge), not the
 VPC router (`10.0.2.1`).
+
+### Node clock not synchronised (NodeClockNotSynchronising)
+
+On a node, `chronyc sources` is empty or shows only `0.rhel.pool.ntp.org`, and
+`chronyc tracking` reports stratum 0 with a reference time of 1970. There are two causes,
+and a cluster usually has both.
+
+**1. The services host isn't serving time.** On sandboxes built before the fix to
+`group_vars/role_services.yml`, the STIG pass appended `port 0` to the services host's
+`/etc/chrony.conf`. That turns chrony's NTP server off. chronyd still runs and still keeps
+its own clock, and firewalld and the security groups still allow 123/udp, but nothing answers.
+Every private host is affected, not just the cluster nodes. Check from any private host:
+
+```bash
+sudo chronyd -Q -t 20 "server 10.0.2.10 iburst maxsamples 1"
+# Working: "System clock wrong by 0.000123 seconds (ignored)", exit 0
+# Broken:  "No suitable source for synchronisation", exit 1
+```
+
+Fix it on the services host by removing the line and restarting chronyd. That's the same
+deviation the playbooks now apply, and nothing else changes:
+
+```bash
+ssh services-sandbox
+sudo sed -i '/^port 0$/d' /etc/chrony.conf
+sudo systemctl restart chronyd
+sudo ss -ulpn | grep ':123 '     # chronyd listening again
+```
+
+The RHEL hosts already point at 10.0.2.10 and resync within a few minutes.
+
+**2. The cluster has no NTP source configured.** That's the case if `agent-config.yaml` had
+no `additionalNTPSources` (§1). Point chrony at the services host with a MachineConfig. On
+the machine where you run `oc` (the registry host), write the Butane source:
+
+```yaml
+# 99-master-chrony.bu
+variant: openshift
+version: 4.21.0          # your cluster's minor version
+metadata:
+  name: 99-master-chrony
+  labels:
+    machineconfiguration.openshift.io/role: master
+storage:
+  files:
+    - path: /etc/chrony.conf
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          server 10.0.2.10 iburst
+          driftfile /var/lib/chrony/drift
+          makestep 1.0 3
+          rtcsync
+          logdir /var/log/chrony
+```
+
+```bash
+butane 99-master-chrony.bu -o 99-master-chrony.yaml
+oc apply -f 99-master-chrony.yaml
+oc get mcp master -w        # UPDATED=True when done
+```
+
+`butane` isn't on the sandbox hosts by default. Fetch it while you're still connected, as
+you did for `oc`, or render it on your workstation and copy the YAML over. For `standard`
+(dedicated workers), apply a second copy named `99-worker-chrony` with
+`role: worker`.
+
+> **On SNO this reboots the only node,** so the API is down until it comes back. On
+> `compact` and `standard` the Machine Config Operator reboots nodes one at a time.
+
+Fix cause 1 first. Otherwise the MachineConfig points the nodes at a server that doesn't
+answer, and they stay unsynced. Once a node syncs, `chronyc sources` shows `^* 10.0.2.10` and the alert clears on its next evaluation.
 
 ### Registry connectivity check fails
 
