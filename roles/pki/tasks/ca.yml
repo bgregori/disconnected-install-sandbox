@@ -32,6 +32,10 @@
     path: "{{ pki_ca_csr_path }}"
     privatekey_path: "{{ pki_ca_key_path }}"
     common_name: "{{ pki_ca_common_name }}"
+    # openssl_csr copies the CN into a DNS SAN by default. "Disconnected
+    # Sandbox Root CA" is not a DNS name, and macOS LibreSSL rejects every
+    # chain under the CA for it: "unsupported or invalid name syntax".
+    use_common_name_for_san: false
     basic_constraints:
       - "CA:TRUE"
     basic_constraints_critical: true
