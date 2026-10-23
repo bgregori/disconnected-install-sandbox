@@ -34,7 +34,7 @@ Host kvm-sandbox
 {% for node in ocp_nodes %}
 Host {{ node.name }}-sandbox
     HostName {{ node.ip }}
-    User {{ infra_ssh_config_user }}
+    User {{ infra_ssh_config_node_user }}
     IdentityFile {{ infra_ssh_config_key_path }}
     ProxyCommand ssh -W %h:%p bastion-sandbox
     UserKnownHostsFile {{ infra_ssh_config_known_hosts }}
