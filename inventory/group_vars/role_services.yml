@@ -7,3 +7,18 @@
 #
 # Override chrony_ntp_allow_subnet here if the services host ever needs to
 # serve time to something outside the private subnet.
+
+# STIG deviation: the services host is the sandbox's designated time server.
+#
+# chronyd_client_only (CCE-87543-5) appends `port 0` to /etc/chrony.conf, which
+# turns off chrony's NTP server entirely -- `allow` notwithstanding. Applied
+# here it leaves every private host and every cluster node with no reachable
+# time source: chronyd stays up and `chronyc tracking` still prints a
+# Reference ID, but nothing listens on 123/udp, so clients sit at stratum 0 and
+# the cluster fires NodeClockNotSynchronising. The rule exists for NTP
+# clients; a host whose job is serving time is the case it does not cover.
+#
+# Every other host keeps the rule. cmdport 0 (chronyd_no_chronyc_network) stays
+# on here too -- it only closes chronyc's remote command port, not NTP.
+rhel_hardening_stig_skip_rules:
+  - xccdf_org.ssgproject.content_rule_chronyd_client_only

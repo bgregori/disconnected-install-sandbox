@@ -259,20 +259,79 @@
       register: dns_registry
       changed_when: false
 
+# Time has two ways to fail quietly here, and the old check (print the first
+# line of `chronyc tracking`) passed both: that line is "Reference ID" whether
+# or not the host has ever synced.
+#
+#   1. The services host stops serving. STIG's chronyd_client_only appends
+#      `port 0`, which turns chrony's server off with chronyd still running --
+#      see group_vars/role_services.yml. Checked by asking it for time over NTP
+#      from every other private host. The KVM host's answer stands in for the
+#      cluster nodes: their traffic leaves through its bridge, from the same
+#      subnet the services host allows.
+#   2. A client never syncs. Checked by asserting each host's chrony reports a
+#      synchronised leap status. Retried, because a host fresh from its STIG
+#      reboot takes a few polls to pick its source.
+#
+# Not `chronyc -h 10.0.2.10`: that is chrony's command port (323/udp), which
+# STIG closes with cmdport 0 and which never carried NTP in the first place.
 - name: validate ntp service
   hosts: role_services:role_registry:role_kvm
   gather_facts: false
 
   tasks:
-    - name: check chrony sync status
+    # -Q sends real NTP queries, prints the offset and exits without touching
+    # the clock -- safe beside the running chronyd. Exit status is 0 only if a
+    # source answered: "No suitable source" and the -t timeout both exit 1.
+    - name: query the services host over ntp
       ansible.builtin.command:
-        cmd: chronyc tracking
-      register: ntp_status
+        argv:
+          - chronyd
+          - -Q
+          - -t
+          - "20"
+          - "server {{ services_private_ip }} iburst maxsamples 1"
+      register: validate_ntp_query
       changed_when: false
+      failed_when: false
+      when: "'role_services' not in group_names"
 
-    - name: report ntp status
-      ansible.builtin.debug:
-        msg: "NTP: {{ ntp_status.stdout_lines[0] | default('unknown') }}"
+    - name: assert the services host serves time
+      ansible.builtin.assert:
+        that:
+          - validate_ntp_query.rc == 0
+        fail_msg: >-
+          {{ services_private_ip }} did not answer an NTP query from
+          {{ inventory_hostname }}: {{ (validate_ntp_query.stdout ~ ' ' ~ validate_ntp_query.stderr) | trim }}.
+          Check `grep -E '^(port|allow)' /etc/chrony.conf` on the services host -- a `port 0` line turns
+          the server off.
+        success_msg: "{{ services_private_ip }} answers NTP from {{ inventory_hostname }}"
+      when: "'role_services' not in group_names"
+
+    # cmdport 0 closes chronyc's network port, so it can only reach chronyd over
+    # the root-owned local socket -- hence become, which every play here has.
+    - name: check chrony is synchronised
+      ansible.builtin.command:
+        cmd: chronyc -n tracking
+      register: validate_ntp_tracking
+      changed_when: false
+      retries: 12
+      delay: 10
+      until: "'Not synchronised' not in validate_ntp_tracking.stdout"
+      failed_when: false
+
+    - name: assert chrony is synchronised
+      ansible.builtin.assert:
+        that:
+          - validate_ntp_tracking.rc == 0
+          - "'Not synchronised' not in validate_ntp_tracking.stdout"
+        fail_msg: >-
+          chrony on {{ inventory_hostname }} is not synchronised:
+          {{ validate_ntp_tracking.stdout_lines | select('match', '^(Reference ID|Stratum|Leap status)')
+             | join('; ') }}
+        success_msg: >-
+          {{ validate_ntp_tracking.stdout_lines | select('match', '^(Reference ID|Stratum)')
+             | join('; ') }}
 
 - name: validate haproxy on bastion
   hosts: role_bastion

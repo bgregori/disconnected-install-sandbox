@@ -33,6 +33,7 @@
       oscap xccdf eval \
         --remediate \
         --profile {{ rhel_hardening_stig_profile }} \
+        {{ rhel_hardening_stig_skip_args }} \
         --results {{ rhel_hardening_stig_results_dir }}/stig-remediation.xml \
         --report {{ rhel_hardening_stig_results_dir }}/stig-remediation.html \
         {{ rhel_hardening_stig_datastream }}
@@ -126,6 +127,7 @@
     cmd: >-
       oscap xccdf eval
       --profile {{ rhel_hardening_stig_profile }}
+      {{ rhel_hardening_stig_skip_args }}
       --results {{ rhel_hardening_stig_results_dir }}/stig-compliance.xml
       --report {{ rhel_hardening_stig_results_dir }}/stig-compliance.html
       {{ rhel_hardening_stig_datastream }}
