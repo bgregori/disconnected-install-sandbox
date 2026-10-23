@@ -4,6 +4,15 @@ rhel_hardening_apply_stig: true
 rhel_hardening_stig_profile: xccdf_org.ssgproject.content_profile_stig
 rhel_hardening_stig_datastream: /usr/share/xml/scap/ssg/content/ssg-rhel9-ds.xml
 rhel_hardening_stig_results_dir: /var/log/openscap
+
+# STIG rules to leave unapplied on this host, as full XCCDF rule ids. Passed to
+# oscap as --skip-rule, for both the remediation and the compliance report, so
+# a skipped rule is neither fixed nor counted as a finding. Each entry is a
+# documented deviation -- set it per group in inventory/group_vars/ with the
+# reason beside it, never here.
+rhel_hardening_stig_skip_rules: []
+rhel_hardening_stig_skip_args: >-
+  {{ rhel_hardening_stig_skip_rules | map('regex_replace', '^', '--skip-rule ') | join(' ') }}
 rhel_hardening_audit_backlog_limit: 65536
 rhel_hardening_audit_max_log_file: 100
 rhel_hardening_audit_num_logs: 20

@@ -152,6 +152,11 @@ yamllint .
   endpoint list in `playbooks/validate.yml` so it is checked to chain to that root. The CA private
   key stays on the controller under `artifacts/pki/`; hosts only ever see leaf keys and the anchor.
 
+- STIG exceptions go through `rhel_hardening_stig_skip_rules` (full XCCDF rule ids), set per group in
+  `inventory/group_vars/role_<group>.yml` with the reason beside each one. Never patch around a STIG
+  change after the fact; a later STIG pass undoes it. The services host skips `chronyd_client_only`,
+  whose `port 0` would stop it serving NTP to the whole sandbox.
+
 ### Storage Rules
 
 - NEVER write a device path to `/etc/fstab`. AWS assigns NVMe names in attach order at boot, so they move

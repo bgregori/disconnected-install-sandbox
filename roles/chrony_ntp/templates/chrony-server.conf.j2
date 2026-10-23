@@ -1,4 +1,8 @@
 # Air-gapped NTP server — no upstream sources, local clock reference
+#
+# The STIG pass appends to this file after it is written. Its chronyd_client_only
+# rule would add `port 0` and switch this server off, so that rule is skipped on
+# the services host -- see inventory/group_vars/role_services.yml.
 local stratum {{ chrony_ntp_local_stratum }}
 allow {{ chrony_ntp_allow_subnet }}
 
