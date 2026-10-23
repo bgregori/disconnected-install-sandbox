@@ -1,6 +1,8 @@
 ---
 infra_ssh_config_key_path: "{{ ssh_key_path }}"
 infra_ssh_config_user: ec2-user
+# OCP nodes run RHCOS, whose login user is core -- ec2-user does not exist there.
+infra_ssh_config_node_user: core
 infra_ssh_config_dir: "~/.ssh"
 infra_ssh_config_file: "~/.ssh/config.d/disconnected-sandbox"
 # Sandbox hosts reuse static private IPs across reprovisions, so their host keys
