@@ -241,21 +241,32 @@
       loop_control:
         label: "{{ item.name }}"
       vars:
+        # service/on name what serves each endpoint, for the failure message.
         validate_tls_endpoints: >-
-          {{ [{'name': 'bastion repo', 'host': bastion_private_ip, 'port': bastion_repo_port}]
-             + ([{'name': 'keycloak issuer', 'host': keycloak_hostname, 'port': keycloak_port}]
+          {{ [{'name': 'bastion repo', 'host': bastion_private_ip, 'port': bastion_repo_port,
+               'service': 'httpd', 'on': 'the bastion'}]
+             + ([{'name': 'keycloak issuer', 'host': keycloak_hostname, 'port': keycloak_port,
+                  'service': 'keycloak', 'on': 'the services host'}]
                 if enable_keycloak_idp | bool else [])
-             + ([{'name': 'redfish bmc', 'host': kvm_private_ip, 'port': redfish_port}]
+             + ([{'name': 'redfish bmc', 'host': kvm_private_ip, 'port': redfish_port,
+                  'service': 'sushy-emulator', 'on': 'the KVM host'}]
                 if enable_kvm_host | bool else []) }}
 
+    # Empty stdout means openssl never got as far as a verify result -- nothing
+    # accepted the connection. That is a stopped service, not a bad chain, and
+    # the message says so: an interrupted "configure redfish bmc" leaves
+    # sushy-emulator inactive with no config, which otherwise reads as a
+    # certificate problem.
     - name: assert every endpoint verified
       ansible.builtin.assert:
         that:
           - "'Verify return code: 0 (ok)' in item.stdout"
         fail_msg: >-
-          {{ item.item.name }} at {{ item.item.host }}:{{ item.item.port }} did not
-          present a chain this host trusts -- openssl said:
-          {{ item.stdout | default('(no output)') | trim }}
+          {{ item.item.name }} at {{ item.item.host }}:{{ item.item.port }}
+          {{ ('did not answer at all -- ' ~ item.item.service ~ ' on ' ~ item.item.on
+              ~ ' is probably not running. Check: systemctl status ' ~ item.item.service)
+             if item.stdout | default('') | trim | length == 0
+             else ('did not present a chain this host trusts -- openssl said: ' ~ item.stdout | trim) }}
         success_msg: "{{ item.item.name }} chains to the sandbox root"
       loop: "{{ validate_pki_endpoints.results }}"
       loop_control:
@@ -414,13 +425,23 @@
       loop_control:
         label: "{{ item.name }}"
 
-    - name: verify sushy-emulator is running
+    # Name only, no state: the module just reports the unit's status.
+    - name: check sushy-emulator is running
       ansible.builtin.systemd:
         name: sushy-emulator
-        state: started
-      check_mode: true
       register: validate_sushy
-      failed_when: validate_sushy.changed
+      check_mode: true
+      failed_when: false
+
+    - name: assert sushy-emulator is running
+      ansible.builtin.assert:
+        that:
+          - validate_sushy.status.ActiveState | default('') == 'active'
+        fail_msg: >-
+          sushy-emulator is {{ validate_sushy.status.ActiveState | default('not installed') }},
+          so the Redfish BMC is down. An interrupted "configure redfish bmc" leaves it
+          like this with no config; rerun Phase 2 to reconfigure it.
+        success_msg: sushy-emulator is active
 
     - name: verify redfish api responds
       ansible.builtin.uri:
