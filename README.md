@@ -466,3 +466,18 @@ aws ec2 describe-vpc-block-public-access-options --region us-east-2 \
 
 `off` is what you want. If the account admin has added a BPA exclusion for the sandbox,
 pass `-e bpa_check=false` to skip the check.
+
+### `ssh services-sandbox` fails with "REMOTE HOST IDENTIFICATION HAS CHANGED"
+
+A host has started presenting a different key from the one recorded in the sandbox's
+known_hosts. Expected causes: the host was rebuilt (the private IPs are reused), or it came
+back in FIPS mode, which stops sshd offering ed25519. That happens on a host whose run was cut
+off between enabling FIPS and its reboot, and then restarted later. Phase 2 and `validate.yml`
+clear the file at the start of every run. To fix a manual `ssh` before then:
+
+```bash
+rm ~/.ssh/known_hosts.disconnected-sandbox
+```
+
+The file only holds sandbox host keys, never your real ones. The SSH config re-learns each key
+on first connect.

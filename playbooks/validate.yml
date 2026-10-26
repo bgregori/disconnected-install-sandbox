@@ -10,6 +10,31 @@
     - name: check topology against the built environment
       ansible.builtin.include_tasks: topology_check.yml
 
+    # Same reason as the first purge in phase2_configure.yml: a host that came
+    # back in FIPS mode outside a clean run presents a key the file does not
+    # hold, and a changed bastion key kills every tunnel through it.
+    - name: discard sandbox host keys left by earlier runs
+      ansible.builtin.file:
+        path: "{{ sandbox_known_hosts }}"
+        state: absent
+
+# Run straight after site.yml, the bastion may still be coming back from its
+# STIG reboot -- the last thing Phase 2 does -- and every private host tunnels
+# through it. Without this wait each of them fails its first check as
+# unreachable and is dropped from the rest of the run. Costs nothing on a
+# sandbox that is already up.
+- name: wait for every host to answer ssh
+  hosts: role_bastion:role_services:role_registry:role_kvm
+  gather_facts: false
+  become: false
+  tasks:
+    - name: drop ssh sockets cached from before any reboot
+      ansible.builtin.meta: reset_connection
+
+    - name: wait for ssh to answer
+      ansible.builtin.wait_for_connection:
+        timeout: "{{ host_ssh_wait_timeout }}"
+
 - name: Validate disconnected sandbox — end-to-end checks
   hosts: all
   gather_facts: true

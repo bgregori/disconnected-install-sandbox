@@ -17,6 +17,32 @@
     - name: check topology against the built environment
       ansible.builtin.include_tasks: topology_check.yml
 
+# Step 2.0.0a: Start from an empty sandbox known_hosts
+#
+# The purges after the FIPS reboots below only run on the success path. A host
+# lost between `fips-mode-setup --enable` and its reboot is left switched to
+# FIPS, and its next restart (an instance stop/start, say) brings it up
+# presenting ecdsa instead of the ed25519 key recorded for it. Nothing purges
+# that on the next run: if it is the bastion, every private-host tunnel dies
+# at the jump hop ("forwarding disabled due to host key check failure") from
+# the very first play, long before the first purge; whichever host it is, the
+# accept-new stanzas in ~/.ssh/config.d refuse it by hand with REMOTE HOST
+# IDENTIFICATION HAS CHANGED.
+#
+# The file is sandbox-scoped and disposable by design -- it is already purged
+# twice per run -- so purge it up front too and let the next connections
+# relearn whatever keys the hosts present now. Seen on sandbox830.
+- name: discard sandbox host keys left by earlier runs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: remove sandbox known_hosts
+      ansible.builtin.file:
+        path: "{{ sandbox_known_hosts }}"
+        state: absent
+
 # Step 2.0: Wait for every managed host to answer SSH
 #
 # FIRST, before any play targets a host. An unreachable host is not a
