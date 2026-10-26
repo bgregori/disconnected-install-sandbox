@@ -260,11 +260,12 @@ curl -f -X POST \
   -d "{\"ResetType\": \"${RESET}\"}"
 ```
 
-> **"Once" is not one-shot here.** With the libvirt driver, sushy-emulator applies the
-> boot override by making the CD the persistent first boot device. As long as the ISO
-> stays inserted, every boot goes to it, including the reboot after the agent has
-> written RHCOS to disk. That is why §6 ejects the media at a specific point rather
-> than "after install".
+> **Media changes only take effect on a power cycle.** sushy-emulator applies
+> InsertMedia, EjectMedia and the boot override to the domain's *stored* libvirt
+> definition. A running VM keeps the devices it was started with, and a reboot from
+> inside the guest is not a power cycle, so it doesn't pick up the new definition.
+> Only a Redfish power action (`On` from off, `ForceRestart`) starts the domain from
+> the stored definition. That's why §6 ejects in a specific order.
 
 > **VirtualMedia lives under `Systems`, not `Managers`.** This emulator exposes it
 > at `/redfish/v1/Systems/<uuid>/VirtualMedia/Cd`; the `Managers` path returns 404.
@@ -331,49 +332,63 @@ journalctl -u assisted-service.service -f
 |-------|-------------|
 | Agent boot | VNC shows kernel loading, `nslookup` checks, registry connectivity checks |
 | Bootstrap | `Waiting for services`, `Cluster installation in progress` |
-| Pivot | `Writing image to disk: 100%`, then the node reboots — **eject the ISO now** (§6) |
+| Pivot | `Writing image to disk: 100%` — **eject only, don't restart** (§6). The node reboots by itself |
 | Operators | Cluster operators start reconciling |
 | Complete | `Finished Bootkube`, `Reached target Multi-User System` |
 
-## 6. Eject the ISO when the image is written
+## 6. Eject the ISO and boot the installed disk
 
-Eject as soon as `agent wait-for` (or the VNC console) shows **`Writing image to disk: 100%`**.
-Don't wait for the install to finish. The CD is the first boot device while media is inserted
-(see the note in §4), so a VM that still has the ISO when it reboots boots the agent again
-instead of the RHCOS it just wrote.
+The agent writes RHCOS to `vda`, then reboots the VM by itself. That reboot comes from
+inside the guest, so the VM keeps its CD and boots the agent ISO again (see the note in
+§4). Getting it onto the installed disk takes three steps in this order: eject, wait for
+the guest's own reboot, then power-cycle.
 
-Eject through Redfish, the same interface that inserted the media:
+> **Never power-cycle at `Writing image to disk: 100%`.** "100%" is reported before the
+> installer has finished writing the disk out. A `ForceRestart` at that point corrupts
+> the install. The node boots from disk into emergency mode with
+> `mount: /sysroot: wrong fs type, bad superblock on /dev/vda4`, and the only way back
+> is to reinstall from the ISO (§4).
+
+**1. At `Writing image to disk: 100%`, eject the media. Do nothing else.**
 
 ```bash
 curl -f -X POST \
   https://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID}/VirtualMedia/Cd/Actions/VirtualMedia.EjectMedia \
   -H 'Content-Type: application/json' -d '{}'
-# 204 No Content on success
+# 204 No Content; VirtualMedia/Cd now reports "Inserted": false
 ```
 
-For multi-node, repeat for each VM UUID.
+This changes only the stored definition. `virsh domblklist` still shows the CD with the
+image attached to the running VM, and that's expected.
 
-> **Not `virsh change-media … sda`.** The domain is defined with its CD on `sda`, but
-> sushy-emulator attaches virtual media as its own device (`sdx` on this build), so
-> `sda` targets the wrong device.
+**2. Wait for the guest to reboot by itself.** It comes back up on the agent ISO. The new
+agent has no cluster, so `agent wait-for` starts logging `404 v2GetClusterNotFound`.
+That's your signal that the install has finished writing and the old agent has gone.
 
-### If the VM has already booted the ISO again
-
-You can tell from `agent wait-for`: it loops on `404 v2GetClusterNotFound`, because the
-agent that just booted is a fresh one with no cluster. RHCOS is already on disk, so eject
-and force a restart:
+**3. Only then, power-cycle the VM.**
 
 ```bash
-curl -f -X POST \
-  https://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID}/VirtualMedia/Cd/Actions/VirtualMedia.EjectMedia \
-  -H 'Content-Type: application/json' -d '{}'
 curl -f -X POST \
   https://${KVM_IP}:8000/redfish/v1/Systems/${VM_UUID}/Actions/ComputerSystem.Reset \
   -H 'Content-Type: application/json' -d '{"ResetType": "ForceRestart"}'
 ```
 
-The node boots from disk and the install carries on. Re-run `agent wait-for` if it
-had given up.
+`ForceRestart` starts the domain from the stored definition, now without the CD, so it
+boots RHCOS from disk and bootstrap-in-place carries on. Re-run `agent wait-for` if it
+gave up during the 404s.
+
+For multi-node clusters, do this per VM as each one reaches step 2.
+
+> **Not `virsh change-media … sda`.** The domain is defined with its CD on `sda`, but
+> sushy-emulator attaches virtual media as its own device (`sdx` on this build), so
+> `sda` targets the wrong device. Use Redfish for every media change, so sushy's view
+> and libvirt's stay in step.
+
+### If the node lands in emergency mode
+
+`wrong fs type, bad superblock on /dev/vda4` means the disk was power-cycled before the
+write finished. Reinstall: insert the ISO and power the VM on again as in §4, then follow
+this section's three steps.
 
 ## 7. Verify the cluster
 
